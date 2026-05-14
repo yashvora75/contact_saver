@@ -1,10 +1,12 @@
 const STORAGE_KEY = "contactSaverCards";
-const DRAFT_KEY = "contactSaverActiveDraft";
-const QR_VERSION = "draft-save-6";
+const DELETED_KEY = "contactSaverDeletedCards";
+const QR_VERSION = "photo-trash-7";
 
 const state = {
   contacts: [],
-  selected: null
+  deleted: [],
+  selected: null,
+  showingDeleted: false
 };
 
 const createView = document.querySelector("#createView");
@@ -19,7 +21,13 @@ const qrCanvas = document.querySelector("#qrCanvas");
 const qrError = document.querySelector("#qrError");
 const previewCard = document.querySelector("#previewCard");
 const downloadVcf = document.querySelector("#downloadVcf");
+const photoInput = document.querySelector("#photoInput");
+const photoPreview = document.querySelector("#photoPreview");
+const removePhotoButton = document.querySelector("#removePhoto");
+const savedTitle = document.querySelector("#savedTitle");
+const deletedToggle = document.querySelector("#deletedToggle");
 let qrLibraryPromise = null;
+let autosaveTimer = null;
 
 function clean(value) {
   return String(value || "").trim();
@@ -49,6 +57,13 @@ function draftName() {
     minute: "2-digit"
   });
   return `Untitled Contact ${stamp}`;
+}
+
+function avatarHtml(contact, extraClass = "") {
+  if (contact?.photoData) {
+    return `<div class="avatar photo-avatar ${extraClass}"><img src="${escapeHtml(contact.photoData)}" alt=""></div>`;
+  }
+  return `<div class="avatar ${extraClass}">${escapeHtml(initials(contact?.fullName))}</div>`;
 }
 
 function initials(name) {
@@ -129,6 +144,8 @@ function normalizeContact(contact) {
     email: clean(contact.email).toLowerCase(),
     website: clean(contact.website),
     address: clean(contact.address),
+    photoData: clean(contact.photoData),
+    deletedAt: contact.deletedAt || "",
     updatedAt: contact.updatedAt || new Date().toISOString()
   };
 }
@@ -165,6 +182,10 @@ function saveContacts() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.contacts));
 }
 
+function saveDeleted() {
+  localStorage.setItem(DELETED_KEY, JSON.stringify(state.deleted));
+}
+
 function hasMeaningfulContactData(contact) {
   if (!contact) return false;
   return Boolean(
@@ -174,7 +195,21 @@ function hasMeaningfulContactData(contact) {
     clean(contact.email) ||
     clean(contact.website) ||
     clean(contact.address) ||
+    clean(contact.photoData) ||
     normalizePhoneEntries(contact).some(entry => fullPhone(entry))
+  );
+}
+
+function formHasContent() {
+  return Boolean(
+    clean(form.fullName.value) ||
+    clean(form.role.value) ||
+    clean(form.company.value) ||
+    clean(form.email.value) ||
+    clean(form.website.value) ||
+    clean(form.address.value) ||
+    clean(form.photoData.value) ||
+    phoneValuesFromForm().length
   );
 }
 
@@ -188,43 +223,44 @@ function upsertContact(contact) {
   return normalized;
 }
 
-function clearActiveDraft() {
-  localStorage.removeItem(DRAFT_KEY);
+function removeFromDeleted(id) {
+  state.deleted = state.deleted.filter(contact => contact.id !== id);
+  saveDeleted();
 }
 
-function saveActiveDraft() {
-  const contact = contactFromForm({ allowUntitled: true });
-  if (!hasMeaningfulContactData(contact)) {
-    clearActiveDraft();
-    return;
-  }
-  localStorage.setItem(DRAFT_KEY, JSON.stringify(contact));
+function moveToDeleted(contact) {
+  const normalized = { ...normalizeContact(contact), deletedAt: new Date().toISOString() };
+  state.deleted = [normalized, ...state.deleted.filter(item => item.id !== normalized.id)];
+  saveDeleted();
 }
 
-function preserveActiveDraft() {
+function autosaveCurrentForm() {
+  if (!formHasContent()) return null;
   const contact = contactFromForm({ allowUntitled: true });
-  if (!hasMeaningfulContactData(contact)) {
-    clearActiveDraft();
-    return null;
-  }
+  if (!hasMeaningfulContactData(contact)) return null;
   const saved = upsertContact(contact);
-  clearActiveDraft();
+  removeFromDeleted(saved.id);
+  state.selected = saved;
+  form.id.value = saved.id;
   renderList();
+  renderPreview();
   return saved;
 }
 
-function importSavedDraft() {
-  const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
-  if (!hasMeaningfulContactData(draft)) {
-    clearActiveDraft();
-    return;
-  }
-  upsertContact(draft);
-  clearActiveDraft();
+function scheduleAutosave() {
+  clearTimeout(autosaveTimer);
+  autosaveTimer = setTimeout(() => {
+    const saved = autosaveCurrentForm();
+    if (saved) {
+      messageEl.style.color = "var(--success)";
+      messageEl.textContent = "Autosaved.";
+    }
+  }, 350);
 }
 
 function loadContacts() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
+  const deleted = JSON.parse(localStorage.getItem(DELETED_KEY) || "null");
   const seed = [{
     id: crypto.randomUUID(),
     fullName: "Aanya Shah",
@@ -240,9 +276,12 @@ function loadContacts() {
   state.contacts = (Array.isArray(saved) && saved.length ? saved : seed)
     .map(normalizeContact)
     .filter(contact => contact.fullName);
-  importSavedDraft();
+  state.deleted = (Array.isArray(deleted) ? deleted : [])
+    .map(normalizeContact)
+    .filter(contact => contact.fullName);
   state.selected = null;
   saveContacts();
+  saveDeleted();
 }
 
 function phoneValuesFromForm() {
@@ -291,6 +330,8 @@ function fillForm(contact = {}) {
   form.email.value = contact.email || "";
   form.website.value = contact.website || "";
   form.address.value = contact.address || "";
+  form.photoData.value = contact.photoData || "";
+  renderPhotoPreview(contact.photoData);
   renderPhoneFields(normalizePhoneEntries(contact));
 }
 
@@ -309,8 +350,42 @@ function contactFromForm(options = {}) {
     email: clean(data.email).toLowerCase(),
     website: clean(data.website),
     address: clean(data.address),
+    photoData: clean(data.photoData),
     updatedAt: new Date().toISOString()
   };
+}
+
+function renderPhotoPreview(photoData) {
+  if (photoData) {
+    photoPreview.innerHTML = `<img src="${escapeHtml(photoData)}" alt="">`;
+    photoPreview.classList.add("has-photo");
+    return;
+  }
+  photoPreview.textContent = "Photo";
+  photoPreview.classList.remove("has-photo");
+}
+
+function resizeImage(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const image = new Image();
+      image.onload = () => {
+        const maxSize = 360;
+        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
+        const canvas = document.createElement("canvas");
+        canvas.width = Math.max(1, Math.round(image.width * scale));
+        canvas.height = Math.max(1, Math.round(image.height * scale));
+        const context = canvas.getContext("2d");
+        context.drawImage(image, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL("image/jpeg", 0.82));
+      };
+      image.onerror = reject;
+      image.src = reader.result;
+    };
+    reader.onerror = reject;
+    reader.readAsDataURL(file);
+  });
 }
 
 function updateVcfLink(contact) {
@@ -480,7 +555,7 @@ function renderPreview() {
   }
 
   previewCard.innerHTML = `
-    <div class="avatar">${escapeHtml(initials(contact.fullName))}</div>
+    ${avatarHtml(contact)}
     <h3>${escapeHtml(contact.fullName)}</h3>
     <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
     <p>${escapeHtml(phoneLabelSummary(contact))}</p>
@@ -490,16 +565,21 @@ function renderPreview() {
 }
 
 function renderList() {
+  const items = state.showingDeleted ? state.deleted : state.contacts;
   countEl.textContent = `${state.contacts.length} card${state.contacts.length === 1 ? "" : "s"}`;
-  if (!state.contacts.length) {
-    listEl.innerHTML = '<p class="muted">No cards yet.</p>';
+  savedTitle.textContent = state.showingDeleted ? "Deleted cards" : "Saved cards";
+  deletedToggle.textContent = state.showingDeleted ? "Saved Cards" : "Deleted Cards";
+  deletedToggle.href = state.showingDeleted ? "#saved" : "#deleted";
+
+  if (!items.length) {
+    listEl.innerHTML = `<p class="muted">No ${state.showingDeleted ? "deleted" : "saved"} cards yet.</p>`;
     return;
   }
 
-  listEl.innerHTML = state.contacts.map(contact => `
+  listEl.innerHTML = items.map(contact => `
     <article class="contact-item" data-id="${escapeHtml(contact.id)}">
       <div class="contact-main">
-        <div class="avatar">${escapeHtml(initials(contact.fullName))}</div>
+        ${avatarHtml(contact)}
         <div>
           <h3>${escapeHtml(contact.fullName)}</h3>
           <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
@@ -507,16 +587,22 @@ function renderList() {
         </div>
       </div>
       <div class="contact-actions">
-        <button class="icon-button" type="button" data-action="select">Preview</button>
-        <button class="icon-button" type="button" data-action="edit">Edit</button>
-        <button class="icon-button danger" type="button" data-action="delete">Delete</button>
+        ${state.showingDeleted ? `
+          <button class="icon-button" type="button" data-action="restore">Restore</button>
+          <button class="icon-button danger" type="button" data-action="purge">Delete Forever</button>
+        ` : `
+          <button class="icon-button" type="button" data-action="select">Preview</button>
+          <button class="icon-button" type="button" data-action="edit">Edit</button>
+          <button class="icon-button danger" type="button" data-action="delete">Delete</button>
+        `}
       </div>
     </article>
   `).join("");
 }
 
 function showView() {
-  const showSaved = location.hash === "#saved";
+  const showSaved = location.hash === "#saved" || location.hash === "#deleted";
+  state.showingDeleted = location.hash === "#deleted";
   createView.hidden = showSaved;
   savedView.hidden = !showSaved;
   document.body.classList.toggle("saved-active", showSaved);
@@ -537,7 +623,7 @@ phoneFields.addEventListener("click", event => {
       button.disabled = false;
     });
     phoneFields.querySelector(".phone-row:last-child .phone-label-input")?.focus();
-    saveActiveDraft();
+    scheduleAutosave();
     return;
   }
 
@@ -547,7 +633,7 @@ phoneFields.addEventListener("click", event => {
   const rows = phoneFields.querySelectorAll(".phone-row");
   if (!rows.length) renderPhoneFields([{ label: "Mobile", countryCode: "+91", number: "" }]);
   if (rows.length === 1) rows[0].querySelector(".remove-phone").disabled = true;
-  saveActiveDraft();
+  scheduleAutosave();
 });
 
 if (addPhoneButton) {
@@ -562,10 +648,10 @@ form.addEventListener("submit", event => {
   messageEl.style.color = "var(--success)";
   try {
     const contact = contactFromForm();
-    upsertContact(contact);
-    state.selected = contact;
-    clearActiveDraft();
-    fillForm(contact);
+    const saved = upsertContact(contact);
+    removeFromDeleted(saved.id);
+    state.selected = saved;
+    fillForm(saved);
     renderList();
     renderPreview();
     messageEl.textContent = "Saved. QR updated.";
@@ -576,7 +662,7 @@ form.addEventListener("submit", event => {
 });
 
 document.querySelector("#resetForm").addEventListener("click", () => {
-  const saved = preserveActiveDraft();
+  const saved = autosaveCurrentForm();
   state.selected = null;
   fillForm();
   messageEl.textContent = "";
@@ -591,7 +677,8 @@ listEl.addEventListener("click", event => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const item = event.target.closest(".contact-item");
-  const contact = state.contacts.find(candidate => candidate.id === item.dataset.id);
+  const source = state.showingDeleted ? state.deleted : state.contacts;
+  const contact = source.find(candidate => candidate.id === item.dataset.id);
   if (!contact) return;
 
   if (button.dataset.action === "select") {
@@ -605,11 +692,27 @@ listEl.addEventListener("click", event => {
     window.scrollTo({ top: 0, behavior: "smooth" });
   }
   if (button.dataset.action === "delete") {
+    clearTimeout(autosaveTimer);
+    moveToDeleted(contact);
     state.contacts = state.contacts.filter(candidate => candidate.id !== contact.id);
-    if (state.selected?.id === contact.id) state.selected = state.contacts[0] || null;
+    if (state.selected?.id === contact.id || form.id.value === contact.id) {
+      state.selected = null;
+      fillForm();
+      renderPreview();
+    }
     saveContacts();
     renderList();
-    renderPreview();
+  }
+  if (button.dataset.action === "restore") {
+    const restored = upsertContact(contact);
+    removeFromDeleted(contact.id);
+    state.selected = restored;
+    renderList();
+  }
+  if (button.dataset.action === "purge") {
+    state.deleted = state.deleted.filter(candidate => candidate.id !== contact.id);
+    saveDeleted();
+    renderList();
   }
 });
 
@@ -630,8 +733,30 @@ document.querySelector("#downloadQr").addEventListener("click", async () => {
 });
 
 window.addEventListener("hashchange", showView);
-window.addEventListener("beforeunload", preserveActiveDraft);
-form.addEventListener("input", saveActiveDraft);
+window.addEventListener("beforeunload", autosaveCurrentForm);
+form.addEventListener("input", scheduleAutosave);
+
+photoInput.addEventListener("change", async () => {
+  const file = photoInput.files?.[0];
+  if (!file) return;
+  try {
+    const photoData = await resizeImage(file);
+    form.photoData.value = photoData;
+    renderPhotoPreview(photoData);
+    scheduleAutosave();
+  } catch {
+    messageEl.style.color = "var(--danger)";
+    messageEl.textContent = "Could not load that photo.";
+  } finally {
+    photoInput.value = "";
+  }
+});
+
+removePhotoButton.addEventListener("click", () => {
+  form.photoData.value = "";
+  renderPhotoPreview("");
+  scheduleAutosave();
+});
 
 loadContacts();
 fillForm();

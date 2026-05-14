@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=draft-save-6">
-  <script defer src="qrious.min.js?v=draft-save-6"></script>
-  <script defer src="app.js?v=draft-save-6"></script>
+  <link rel="stylesheet" href="styles.css?v=photo-trash-7">
+  <script defer src="qrious.min.js?v=photo-trash-7"></script>
+  <script defer src="app.js?v=photo-trash-7"></script>
 </head>
 <body>
   <header class="topbar">
@@ -61,6 +61,17 @@
               <span>Address</span>
               <input name="address" placeholder="City, state, country">
             </label>
+            <div class="wide photo-section">
+              <span>Photo</span>
+              <div class="photo-picker">
+                <div class="photo-preview" id="photoPreview">Photo</div>
+                <div class="photo-actions">
+                  <input type="hidden" name="photoData">
+                  <input id="photoInput" type="file" accept="image/*" aria-label="Upload photo">
+                  <button class="ghost-button" type="button" id="removePhoto">Remove Photo</button>
+                </div>
+              </div>
+            </div>
             <div class="wide phone-section">
               <div class="label-row">
                 <span>Phone numbers</span>
@@ -120,7 +131,10 @@
           <p class="eyebrow">Saved locally</p>
           <h1 id="savedTitle">Saved cards</h1>
         </div>
-        <a class="primary-button" href="./">Create New</a>
+        <div class="saved-actions">
+          <a class="ghost-button" href="#deleted" id="deletedToggle">Deleted Cards</a>
+          <a class="primary-button" href="./">Create New</a>
+        </div>
       </div>
       <div id="contactList" class="contact-list"></div>
     </section>
