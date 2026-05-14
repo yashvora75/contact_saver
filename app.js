@@ -16,6 +16,7 @@ const qrCanvas = document.querySelector("#qrCanvas");
 const qrError = document.querySelector("#qrError");
 const previewCard = document.querySelector("#previewCard");
 const downloadVcf = document.querySelector("#downloadVcf");
+let qrLibraryPromise = null;
 
 function clean(value) {
   return String(value || "").trim();
@@ -170,13 +171,8 @@ async function renderQr(contact) {
   qrError.hidden = true;
   qrCanvas.hidden = false;
   const payload = qrPayload(contact);
-  if (!window.QRious) {
-    qrCanvas.hidden = true;
-    qrError.hidden = false;
-    qrError.textContent = "QR library is still loading. Refresh if it does not appear.";
-    return;
-  }
   try {
+    await waitForQrLibrary();
     new QRious({
       element: qrCanvas,
       value: payload,
@@ -191,6 +187,58 @@ async function renderQr(contact) {
     qrError.hidden = false;
     qrError.textContent = error.message;
   }
+}
+
+function waitForQrLibrary() {
+  if (window.QRious) return Promise.resolve(window.QRious);
+  if (qrLibraryPromise) return qrLibraryPromise;
+
+  qrLibraryPromise = new Promise((resolve, reject) => {
+    const startedAt = Date.now();
+    const existingScript = document.querySelector('script[src*="qrious.min.js"]');
+
+    function finishIfReady() {
+      if (window.QRious) {
+        resolve(window.QRious);
+        return true;
+      }
+      return false;
+    }
+
+    if (finishIfReady()) return;
+
+    const timer = setInterval(() => {
+      if (finishIfReady()) {
+        clearInterval(timer);
+        return;
+      }
+      if (Date.now() - startedAt > 8000) {
+        clearInterval(timer);
+        reject(new Error("QR generator could not load. Please hard refresh with Ctrl + F5."));
+      }
+    }, 80);
+
+    if (existingScript) {
+      existingScript.addEventListener("load", finishIfReady, { once: true });
+      existingScript.addEventListener("error", () => {
+        clearInterval(timer);
+        reject(new Error("QR generator file failed to load."));
+      }, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = "qrious.min.js?v=qr-fix-3";
+    script.defer = true;
+    script.addEventListener("load", finishIfReady, { once: true });
+    script.addEventListener("error", () => {
+      clearInterval(timer);
+      reject(new Error("QR generator file failed to load."));
+    }, { once: true });
+    document.head.appendChild(script);
+  });
+
+  return qrLibraryPromise;
 }
 
 function renderPreview() {
