@@ -1,5 +1,6 @@
 const STORAGE_KEY = "contactSaverCards";
-const QR_VERSION = "phone-labels-5";
+const DRAFT_KEY = "contactSaverActiveDraft";
+const QR_VERSION = "draft-save-6";
 
 const state = {
   contacts: [],
@@ -38,6 +39,16 @@ function downloadSafeName(value) {
     .replace(/[\\/:*?"<>|]+/g, "")
     .replace(/\s+/g, " ")
     .trim() || "Contact";
+}
+
+function draftName() {
+  const stamp = new Date().toLocaleString([], {
+    day: "2-digit",
+    month: "short",
+    hour: "2-digit",
+    minute: "2-digit"
+  });
+  return `Untitled Contact ${stamp}`;
 }
 
 function initials(name) {
@@ -154,6 +165,64 @@ function saveContacts() {
   localStorage.setItem(STORAGE_KEY, JSON.stringify(state.contacts));
 }
 
+function hasMeaningfulContactData(contact) {
+  if (!contact) return false;
+  return Boolean(
+    clean(contact.fullName) ||
+    clean(contact.role) ||
+    clean(contact.company) ||
+    clean(contact.email) ||
+    clean(contact.website) ||
+    clean(contact.address) ||
+    normalizePhoneEntries(contact).some(entry => fullPhone(entry))
+  );
+}
+
+function upsertContact(contact) {
+  const normalized = normalizeContact(contact);
+  const existing = state.contacts.some(item => item.id === normalized.id);
+  state.contacts = existing
+    ? state.contacts.map(item => item.id === normalized.id ? normalized : item)
+    : [normalized, ...state.contacts];
+  saveContacts();
+  return normalized;
+}
+
+function clearActiveDraft() {
+  localStorage.removeItem(DRAFT_KEY);
+}
+
+function saveActiveDraft() {
+  const contact = contactFromForm({ allowUntitled: true });
+  if (!hasMeaningfulContactData(contact)) {
+    clearActiveDraft();
+    return;
+  }
+  localStorage.setItem(DRAFT_KEY, JSON.stringify(contact));
+}
+
+function preserveActiveDraft() {
+  const contact = contactFromForm({ allowUntitled: true });
+  if (!hasMeaningfulContactData(contact)) {
+    clearActiveDraft();
+    return null;
+  }
+  const saved = upsertContact(contact);
+  clearActiveDraft();
+  renderList();
+  return saved;
+}
+
+function importSavedDraft() {
+  const draft = JSON.parse(localStorage.getItem(DRAFT_KEY) || "null");
+  if (!hasMeaningfulContactData(draft)) {
+    clearActiveDraft();
+    return;
+  }
+  upsertContact(draft);
+  clearActiveDraft();
+}
+
 function loadContacts() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
   const seed = [{
@@ -171,7 +240,8 @@ function loadContacts() {
   state.contacts = (Array.isArray(saved) && saved.length ? saved : seed)
     .map(normalizeContact)
     .filter(contact => contact.fullName);
-  state.selected = state.contacts[0] || null;
+  importSavedDraft();
+  state.selected = null;
   saveContacts();
 }
 
@@ -224,10 +294,10 @@ function fillForm(contact = {}) {
   renderPhoneFields(normalizePhoneEntries(contact));
 }
 
-function contactFromForm() {
+function contactFromForm(options = {}) {
   const data = Object.fromEntries(new FormData(form).entries());
   const existing = state.contacts.find(contact => contact.id === data.id);
-  const fullName = clean(data.fullName);
+  const fullName = clean(data.fullName) || (options.allowUntitled ? draftName() : "");
   if (!fullName) throw new Error("Full name is required");
 
   return {
@@ -399,7 +469,7 @@ function phoneLabelSummary(contact) {
 }
 
 function renderPreview() {
-  const contact = state.selected || state.contacts[0];
+  const contact = state.selected;
   if (!contact) {
     previewCard.innerHTML = `
       <div class="avatar">CS</div>
@@ -467,6 +537,7 @@ phoneFields.addEventListener("click", event => {
       button.disabled = false;
     });
     phoneFields.querySelector(".phone-row:last-child .phone-label-input")?.focus();
+    saveActiveDraft();
     return;
   }
 
@@ -476,6 +547,7 @@ phoneFields.addEventListener("click", event => {
   const rows = phoneFields.querySelectorAll(".phone-row");
   if (!rows.length) renderPhoneFields([{ label: "Mobile", countryCode: "+91", number: "" }]);
   if (rows.length === 1) rows[0].querySelector(".remove-phone").disabled = true;
+  saveActiveDraft();
 });
 
 if (addPhoneButton) {
@@ -490,12 +562,9 @@ form.addEventListener("submit", event => {
   messageEl.style.color = "var(--success)";
   try {
     const contact = contactFromForm();
-    const existing = state.contacts.some(item => item.id === contact.id);
-    state.contacts = existing
-      ? state.contacts.map(item => item.id === contact.id ? contact : item)
-      : [contact, ...state.contacts];
+    upsertContact(contact);
     state.selected = contact;
-    saveContacts();
+    clearActiveDraft();
     fillForm(contact);
     renderList();
     renderPreview();
@@ -507,10 +576,15 @@ form.addEventListener("submit", event => {
 });
 
 document.querySelector("#resetForm").addEventListener("click", () => {
+  const saved = preserveActiveDraft();
   state.selected = null;
   fillForm();
   messageEl.textContent = "";
   renderPreview();
+  if (saved) {
+    messageEl.style.color = "var(--success)";
+    messageEl.textContent = "Previous work saved. New card ready.";
+  }
 });
 
 listEl.addEventListener("click", event => {
@@ -540,7 +614,7 @@ listEl.addEventListener("click", event => {
 });
 
 document.querySelector("#downloadQr").addEventListener("click", async () => {
-  const contact = state.selected || state.contacts[0];
+  const contact = state.selected;
   if (!contact) return;
   try {
     const canvas = document.createElement("canvas");
@@ -556,9 +630,11 @@ document.querySelector("#downloadQr").addEventListener("click", async () => {
 });
 
 window.addEventListener("hashchange", showView);
+window.addEventListener("beforeunload", preserveActiveDraft);
+form.addEventListener("input", saveActiveDraft);
 
 loadContacts();
-fillForm(state.selected);
+fillForm();
 renderList();
 renderPreview();
 showView();
