@@ -1,6 +1,6 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "photo-trash-7";
+const QR_VERSION = "stability-8";
 
 const state = {
   contacts: [],
@@ -28,6 +28,7 @@ const savedTitle = document.querySelector("#savedTitle");
 const deletedToggle = document.querySelector("#deletedToggle");
 let qrLibraryPromise = null;
 let autosaveTimer = null;
+let isHydratingForm = false;
 
 function clean(value) {
   return String(value || "").trim();
@@ -95,9 +96,25 @@ function escapeVCard(value) {
 
 function splitLegacyPhone(value) {
   const text = clean(value);
-  const match = text.match(/^(\+\d{1,4})[\s-]*(.*)$/);
+  const match = text.match(/^(\+\d{1,4})[\s().-]*(.*)$/);
   if (!match) return { label: "Mobile", countryCode: "+91", number: text };
   return { label: "Mobile", countryCode: match[1], number: match[2] };
+}
+
+function looksLikePhone(value) {
+  const text = clean(value);
+  if (!text || /[a-z]/i.test(text)) return false;
+  const digits = text.replace(/\D/g, "");
+  return digits.length >= 6 && /^[+\d\s().-]+$/.test(text);
+}
+
+function splitPhoneNumber(value, fallbackCountryCode = "+91") {
+  const text = clean(value);
+  const match = text.match(/^(\+\d{1,4})[\s().-]*(.+)$/);
+  if (match) {
+    return { countryCode: match[1], number: clean(match[2]) };
+  }
+  return { countryCode: fallbackCountryCode, number: text };
 }
 
 function normalizePhoneEntry(entry, index = 0) {
@@ -179,11 +196,22 @@ function vcardFor(contact) {
 }
 
 function saveContacts() {
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(state.contacts));
+  persistLocal(STORAGE_KEY, state.contacts);
 }
 
 function saveDeleted() {
-  localStorage.setItem(DELETED_KEY, JSON.stringify(state.deleted));
+  persistLocal(DELETED_KEY, state.deleted);
+}
+
+function persistLocal(key, value) {
+  try {
+    localStorage.setItem(key, JSON.stringify(value));
+    return true;
+  } catch {
+    messageEl.style.color = "var(--danger)";
+    messageEl.textContent = "Storage is full. Remove a large photo or delete old cards, then try again.";
+    return false;
+  }
 }
 
 function hasMeaningfulContactData(contact) {
@@ -214,7 +242,7 @@ function formHasContent() {
 }
 
 function upsertContact(contact) {
-  const normalized = normalizeContact(contact);
+  const normalized = { ...normalizeContact(contact), deletedAt: "" };
   const existing = state.contacts.some(item => item.id === normalized.id);
   state.contacts = existing
     ? state.contacts.map(item => item.id === normalized.id ? normalized : item)
@@ -235,6 +263,8 @@ function moveToDeleted(contact) {
 }
 
 function autosaveCurrentForm() {
+  if (isHydratingForm) return null;
+  repairPhoneAutofill();
   if (!formHasContent()) return null;
   const contact = contactFromForm({ allowUntitled: true });
   if (!hasMeaningfulContactData(contact)) return null;
@@ -248,6 +278,7 @@ function autosaveCurrentForm() {
 }
 
 function scheduleAutosave() {
+  if (isHydratingForm) return;
   clearTimeout(autosaveTimer);
   autosaveTimer = setTimeout(() => {
     const saved = autosaveCurrentForm();
@@ -261,19 +292,8 @@ function scheduleAutosave() {
 function loadContacts() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
   const deleted = JSON.parse(localStorage.getItem(DELETED_KEY) || "null");
-  const seed = [{
-    id: crypto.randomUUID(),
-    fullName: "Aanya Shah",
-    role: "Founder",
-    company: "Brill Brains Consulting",
-    phones: [{ label: "Mobile", countryCode: "+91", number: "98765 43210" }],
-    email: "aanya@brillbrains.example",
-    website: "https://brillbrains.example",
-    address: "Mumbai, Maharashtra, India",
-    updatedAt: new Date().toISOString()
-  }];
 
-  state.contacts = (Array.isArray(saved) && saved.length ? saved : seed)
+  state.contacts = (Array.isArray(saved) ? saved : [])
     .map(normalizeContact)
     .filter(contact => contact.fullName);
   state.deleted = (Array.isArray(deleted) ? deleted : [])
@@ -285,13 +305,51 @@ function loadContacts() {
 }
 
 function phoneValuesFromForm() {
+  repairPhoneAutofill();
   return [...form.querySelectorAll(".phone-row")]
     .map((row, index) => normalizePhoneEntry({
-      label: row.querySelector('input[name="phoneLabels"]')?.value || (index === 0 ? "Mobile" : ""),
-      countryCode: row.querySelector('input[name="countryCodes"]')?.value || "+91",
-      number: row.querySelector('input[name="phoneNumbers"]')?.value || ""
+      label: row.querySelector(".phone-label-input")?.value || (index === 0 ? "Mobile" : ""),
+      countryCode: row.querySelector(".country-code-input")?.value || "+91",
+      number: row.querySelector(".phone-number-input")?.value || ""
     }, index))
     .filter(entry => fullPhone(entry));
+}
+
+function repairPhoneAutofill() {
+  let repaired = false;
+  [...form.querySelectorAll(".phone-row")].forEach((row, index) => {
+    const labelInput = row.querySelector(".phone-label-input");
+    const countryInput = row.querySelector(".country-code-input");
+    const numberInput = row.querySelector(".phone-number-input");
+    if (!labelInput || !countryInput || !numberInput) return;
+
+    const label = clean(labelInput.value);
+    const countryCode = clean(countryInput.value) || "+91";
+    const number = clean(numberInput.value);
+
+    if (looksLikePhone(label) && !number) {
+      const parsed = splitPhoneNumber(label, countryCode);
+      countryInput.value = parsed.countryCode || countryCode;
+      numberInput.value = parsed.number;
+      labelInput.value = index === 0 ? "Mobile" : "";
+      repaired = true;
+    }
+
+    if (looksLikePhone(clean(countryInput.value)) && !clean(numberInput.value)) {
+      const parsed = splitPhoneNumber(countryInput.value, "+91");
+      countryInput.value = parsed.countryCode;
+      numberInput.value = parsed.number;
+      repaired = true;
+    }
+
+    if (/^\+\d{1,4}[\s().-]+\d/.test(clean(numberInput.value))) {
+      const parsed = splitPhoneNumber(numberInput.value, clean(countryInput.value) || "+91");
+      countryInput.value = parsed.countryCode;
+      numberInput.value = parsed.number;
+      repaired = true;
+    }
+  });
+  return repaired;
 }
 
 function addIcon() {
@@ -306,11 +364,12 @@ function phoneRowHtml(entry = {}, index = 0, rowCount = 1) {
   const phone = normalizePhoneEntry(entry, index);
   const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales department, Marketing";
   const labelValue = phone.label || (index === 0 ? "Mobile" : "");
+  const section = `section-phone-${index + 1}`;
   return `
     <div class="phone-row">
-      <input class="phone-label-input" name="phoneLabels" value="${escapeHtml(labelValue)}" placeholder="${escapeHtml(labelPlaceholder)}" aria-label="Phone label">
-      <input class="country-code-input" name="countryCodes" value="${escapeHtml(phone.countryCode)}" placeholder="+91" list="countryCodes" aria-label="Country code">
-      <input class="phone-number-input" name="phoneNumbers" value="${escapeHtml(phone.number)}" placeholder="9820942844" autocomplete="tel" aria-label="Phone number">
+      <input class="phone-label-input" value="${escapeHtml(labelValue)}" placeholder="${escapeHtml(labelPlaceholder)}" autocomplete="off" readonly aria-label="Number type">
+      <input class="country-code-input" value="${escapeHtml(phone.countryCode)}" placeholder="+91" list="countryCodes" inputmode="tel" autocomplete="${section} tel-country-code" aria-label="Country code">
+      <input class="phone-number-input" value="${escapeHtml(phone.number)}" placeholder="9820942844" inputmode="tel" autocomplete="${section} tel-national" aria-label="Phone number">
       <button class="circle-button add-phone" type="button" aria-label="Add phone number">${addIcon()}</button>
       <button class="circle-button remove-phone" type="button" aria-label="Remove phone number" ${rowCount === 1 ? "disabled" : ""}>${deleteIcon()}</button>
     </div>
@@ -323,16 +382,20 @@ function renderPhoneFields(phones = []) {
 }
 
 function fillForm(contact = {}) {
-  form.id.value = contact.id || "";
-  form.fullName.value = contact.fullName || "";
-  form.role.value = contact.role || "";
-  form.company.value = contact.company || "";
-  form.email.value = contact.email || "";
-  form.website.value = contact.website || "";
-  form.address.value = contact.address || "";
-  form.photoData.value = contact.photoData || "";
-  renderPhotoPreview(contact.photoData);
-  renderPhoneFields(normalizePhoneEntries(contact));
+  clearTimeout(autosaveTimer);
+  isHydratingForm = true;
+  const normalized = contact.id ? normalizeContact(contact) : contact;
+  form.id.value = normalized.id || "";
+  form.fullName.value = normalized.fullName || "";
+  form.role.value = normalized.role || "";
+  form.company.value = normalized.company || "";
+  form.email.value = normalized.email || "";
+  form.website.value = normalized.website || "";
+  form.address.value = normalized.address || "";
+  form.photoData.value = normalized.photoData || "";
+  renderPhotoPreview(normalized.photoData);
+  renderPhoneFields(normalizePhoneEntries(normalized));
+  isHydratingForm = false;
 }
 
 function contactFromForm(options = {}) {
@@ -546,6 +609,11 @@ function phoneLabelSummary(contact) {
 function renderPreview() {
   const contact = state.selected;
   if (!contact) {
+    const context = qrCanvas.getContext("2d");
+    context.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+    qrError.hidden = true;
+    downloadVcf.removeAttribute("href");
+    downloadVcf.removeAttribute("download");
     previewCard.innerHTML = `
       <div class="avatar">CS</div>
       <h3>Select a card</h3>
@@ -601,6 +669,8 @@ function renderList() {
 }
 
 function showView() {
+  clearTimeout(autosaveTimer);
+  if (location.hash === "#saved" || location.hash === "#deleted") autosaveCurrentForm();
   const showSaved = location.hash === "#saved" || location.hash === "#deleted";
   state.showingDeleted = location.hash === "#deleted";
   createView.hidden = showSaved;
@@ -610,13 +680,20 @@ function showView() {
 }
 
 function selectContact(contact) {
+  clearTimeout(autosaveTimer);
   state.selected = contact;
   renderPreview();
 }
 
+phoneFields.addEventListener("focusin", event => {
+  const labelInput = event.target.closest(".phone-label-input");
+  if (labelInput) labelInput.removeAttribute("readonly");
+});
+
 phoneFields.addEventListener("click", event => {
   const addButton = event.target.closest(".add-phone");
   if (addButton) {
+    clearTimeout(autosaveTimer);
     const nextIndex = phoneFields.querySelectorAll(".phone-row").length;
     phoneFields.insertAdjacentHTML("beforeend", phoneRowHtml({ label: "", countryCode: "+91", number: "" }, nextIndex, nextIndex + 1));
     phoneFields.querySelectorAll(".remove-phone").forEach(button => {
@@ -629,6 +706,7 @@ phoneFields.addEventListener("click", event => {
 
   const button = event.target.closest(".remove-phone");
   if (!button) return;
+  clearTimeout(autosaveTimer);
   button.closest(".phone-row")?.remove();
   const rows = phoneFields.querySelectorAll(".phone-row");
   if (!rows.length) renderPhoneFields([{ label: "Mobile", countryCode: "+91", number: "" }]);
@@ -638,6 +716,7 @@ phoneFields.addEventListener("click", event => {
 
 if (addPhoneButton) {
   addPhoneButton.addEventListener("click", () => {
+    clearTimeout(autosaveTimer);
     phoneFields.insertAdjacentHTML("beforeend", phoneRowHtml({ label: "", countryCode: "+91", number: "" }, phoneFields.querySelectorAll(".phone-row").length, 2));
     phoneFields.querySelector(".phone-row:last-child .phone-label-input")?.focus();
   });
@@ -645,6 +724,7 @@ if (addPhoneButton) {
 
 form.addEventListener("submit", event => {
   event.preventDefault();
+  clearTimeout(autosaveTimer);
   messageEl.style.color = "var(--success)";
   try {
     const contact = contactFromForm();
@@ -662,6 +742,7 @@ form.addEventListener("submit", event => {
 });
 
 document.querySelector("#resetForm").addEventListener("click", () => {
+  clearTimeout(autosaveTimer);
   const saved = autosaveCurrentForm();
   state.selected = null;
   fillForm();
@@ -682,10 +763,12 @@ listEl.addEventListener("click", event => {
   if (!contact) return;
 
   if (button.dataset.action === "select") {
+    clearTimeout(autosaveTimer);
     selectContact(contact);
     location.hash = "";
   }
   if (button.dataset.action === "edit") {
+    clearTimeout(autosaveTimer);
     selectContact(contact);
     fillForm(contact);
     location.hash = "";
@@ -704,13 +787,20 @@ listEl.addEventListener("click", event => {
     renderList();
   }
   if (button.dataset.action === "restore") {
+    clearTimeout(autosaveTimer);
     const restored = upsertContact(contact);
     removeFromDeleted(contact.id);
     state.selected = restored;
+    renderPreview();
     renderList();
   }
   if (button.dataset.action === "purge") {
+    clearTimeout(autosaveTimer);
     state.deleted = state.deleted.filter(candidate => candidate.id !== contact.id);
+    if (state.selected?.id === contact.id) {
+      state.selected = null;
+      renderPreview();
+    }
     saveDeleted();
     renderList();
   }
@@ -734,16 +824,33 @@ document.querySelector("#downloadQr").addEventListener("click", async () => {
 
 window.addEventListener("hashchange", showView);
 window.addEventListener("beforeunload", autosaveCurrentForm);
-form.addEventListener("input", scheduleAutosave);
+window.addEventListener("pagehide", autosaveCurrentForm);
+form.addEventListener("input", () => {
+  if (repairPhoneAutofill()) {
+    messageEl.style.color = "var(--success)";
+    messageEl.textContent = "Phone moved to the correct box.";
+  }
+  scheduleAutosave();
+});
+form.addEventListener("change", () => {
+  repairPhoneAutofill();
+  scheduleAutosave();
+});
 
-photoInput.addEventListener("change", async () => {
+photoInput.addEventListener("change", async event => {
+  event.stopPropagation();
   const file = photoInput.files?.[0];
   if (!file) return;
   try {
     const photoData = await resizeImage(file);
     form.photoData.value = photoData;
     renderPhotoPreview(photoData);
-    scheduleAutosave();
+    clearTimeout(autosaveTimer);
+    const saved = autosaveCurrentForm();
+    if (saved) {
+      messageEl.style.color = "var(--success)";
+      messageEl.textContent = "Photo saved.";
+    }
   } catch {
     messageEl.style.color = "var(--danger)";
     messageEl.textContent = "Could not load that photo.";
@@ -753,9 +860,14 @@ photoInput.addEventListener("change", async () => {
 });
 
 removePhotoButton.addEventListener("click", () => {
+  clearTimeout(autosaveTimer);
   form.photoData.value = "";
   renderPhotoPreview("");
-  scheduleAutosave();
+  const saved = autosaveCurrentForm();
+  if (saved) {
+    messageEl.style.color = "var(--success)";
+    messageEl.textContent = "Photo removed.";
+  }
 });
 
 loadContacts();

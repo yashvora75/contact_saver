@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=photo-trash-7">
-  <script defer src="qrious.min.js?v=photo-trash-7"></script>
-  <script defer src="app.js?v=photo-trash-7"></script>
+  <link rel="stylesheet" href="styles.css?v=stability-8">
+  <script defer src="qrious.min.js?v=stability-8"></script>
+  <script defer src="app.js?v=stability-8"></script>
 </head>
 <body>
   <header class="topbar">
@@ -34,32 +34,32 @@
           <button class="ghost-button" type="button" id="resetForm">New</button>
         </div>
 
-        <form id="contactForm" class="contact-form">
+        <form id="contactForm" class="contact-form" autocomplete="off">
           <input type="hidden" name="id">
           <div class="field-grid">
             <label>
               <span>Full name</span>
-              <input name="fullName" required placeholder="Aanya Shah" autocomplete="name">
+              <input name="fullName" required placeholder="Aanya Shah" autocomplete="section-contact name">
             </label>
             <label>
               <span>Role</span>
-              <input name="role" placeholder="Founder">
+              <input name="role" placeholder="Founder" autocomplete="section-contact organization-title">
             </label>
             <label>
               <span>Company</span>
-              <input name="company" placeholder="Brill Brains">
+              <input name="company" placeholder="Brill Brains" autocomplete="section-contact organization">
             </label>
             <label>
               <span>Email</span>
-              <input name="email" type="email" placeholder="hello@example.com" autocomplete="email">
+              <input name="email" type="email" placeholder="hello@example.com" autocomplete="section-contact email">
             </label>
             <label>
               <span>Website</span>
-              <input name="website" placeholder="https://example.com" autocomplete="url">
+              <input name="website" placeholder="https://example.com" autocomplete="section-contact url">
             </label>
             <label>
               <span>Address</span>
-              <input name="address" placeholder="City, state, country">
+              <input name="address" placeholder="City, state, country" autocomplete="section-contact street-address">
             </label>
             <div class="wide photo-section">
               <span>Photo</span>
