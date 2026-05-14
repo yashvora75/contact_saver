@@ -94,6 +94,18 @@ function escapeVCard(value) {
     .replace(/;/g, "\\;");
 }
 
+// vCard spec: fold lines longer than 75 chars with CRLF + space
+function foldVCardLine(line) {
+  if (line.length <= 75) return line;
+  const chunks = [line.slice(0, 75)];
+  let i = 75;
+  while (i < line.length) {
+    chunks.push(" " + line.slice(i, i + 74));
+    i += 74;
+  }
+  return chunks.join("\r\n");
+}
+
 function splitLegacyPhone(value) {
   const text = clean(value);
   const match = text.match(/^(\+\d{1,4})[\s().-]*(.*)$/);
@@ -167,7 +179,7 @@ function normalizeContact(contact) {
   };
 }
 
-function vcardFor(contact) {
+function vcardFor(contact, includePhoto = false) {
   const names = clean(contact.fullName).split(/\s+/).filter(Boolean);
   const lastName = names.length > 1 ? names[names.length - 1] : "";
   const firstName = names.length > 1 ? names.slice(0, -1).join(" ") : contact.fullName;
@@ -180,6 +192,12 @@ function vcardFor(contact) {
 
   if (contact.company) lines.push(`ORG:${escapeVCard(contact.company)}`);
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
+
+  if (includePhoto && contact.photoData) {
+    const base64 = contact.photoData.replace(/^data:image\/\w+;base64,/, "");
+    lines.push(foldVCardLine(`PHOTO;ENCODING=b;TYPE=JPEG:${base64}`));
+  }
+
   normalizePhoneEntries(contact).forEach((entry, index) => {
     const phone = fullPhone(entry);
     if (!phone) return;
@@ -193,6 +211,34 @@ function vcardFor(contact) {
   if (contact.address) lines.push(`ADR;TYPE=WORK:;;${escapeVCard(contact.address)};;;;`);
   lines.push("END:VCARD");
   return lines.join("\r\n") + "\r\n";
+}
+
+// Returns true when the app is served via HTTP (local server or hosted), not file://
+function isHosted() {
+  return location.protocol === "http:" || location.protocol === "https:";
+}
+
+// When hosted: QR encodes a server URL so the phone downloads the VCF with photo.
+// When not hosted (GitHub Pages / file://): QR encodes raw vCard text (no photo).
+function qrValueFor(contact) {
+  if (isHosted()) {
+    return `${location.origin}/c/${contact.id}`;
+  }
+  return vcardFor(contact);
+}
+
+// Push contact VCF (with photo) to the local server so /c/:id can serve it.
+async function pushToServer(contact) {
+  if (!isHosted()) return;
+  try {
+    await fetch("/api/contact", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ id: contact.id, vcf: vcardFor(contact, true) })
+    });
+  } catch {
+    // Server not running — silently ignore, QR still works via raw vCard fallback
+  }
 }
 
 function saveContacts() {
@@ -248,6 +294,7 @@ function upsertContact(contact) {
     ? state.contacts.map(item => item.id === normalized.id ? normalized : item)
     : [normalized, ...state.contacts];
   saveContacts();
+  pushToServer(normalized);
   return normalized;
 }
 
@@ -452,7 +499,7 @@ function resizeImage(file) {
 }
 
 function updateVcfLink(contact) {
-  const blob = new Blob([vcardFor(contact)], { type: "text/vcard;charset=utf-8" });
+  const blob = new Blob([vcardFor(contact, true)], { type: "text/vcard;charset=utf-8" });
   if (downloadVcf.dataset.url) URL.revokeObjectURL(downloadVcf.dataset.url);
   const url = URL.createObjectURL(blob);
   downloadVcf.dataset.url = url;
@@ -516,7 +563,7 @@ async function drawQr(canvas, contact, size, padding) {
   await waitForQrLibrary();
   new QRious({
     element: canvas,
-    value: vcardFor(contact),
+    value: qrValueFor(contact),
     size,
     padding,
     level: "M",
