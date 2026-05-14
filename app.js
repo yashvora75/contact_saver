@@ -354,14 +354,14 @@ function deleteIcon() {
 
 function phoneRowHtml(entry = {}, index = 0, rowCount = 1) {
   const phone = normalizePhoneEntry(entry, index);
-  const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales department, Marketing";
+  const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales, Marketing";
   const labelValue = phone.label || (index === 0 ? "Mobile" : "");
   const section = `section-phone-${index + 1}`;
   return `
     <div class="phone-row">
       <input class="phone-label-input" value="${escapeHtml(labelValue)}" placeholder="${escapeHtml(labelPlaceholder)}" autocomplete="off" readonly aria-label="Number type">
       <input class="country-code-input" value="${escapeHtml(phone.countryCode)}" placeholder="+91" list="countryCodes" inputmode="tel" autocomplete="off" aria-label="Country code">
-      <input class="phone-number-input" value="${escapeHtml(phone.number)}" placeholder="9820942844" inputmode="tel" autocomplete="${section} tel" aria-label="Phone number">
+      <input class="phone-number-input" value="${escapeHtml(phone.number)}" placeholder="9820942844" inputmode="tel" autocomplete="tel" aria-label="Phone number">
       <button class="circle-button add-phone" type="button" aria-label="Add phone number">${addIcon()}</button>
       <button class="circle-button remove-phone" type="button" aria-label="Remove phone number" ${rowCount === 1 ? "disabled" : ""}>${deleteIcon()}</button>
     </div>
