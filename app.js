@@ -170,18 +170,21 @@ async function renderQr(contact) {
   qrError.hidden = true;
   qrCanvas.hidden = false;
   const payload = qrPayload(contact);
-  if (!window.QRCode) {
+  if (!window.QRious) {
     qrCanvas.hidden = true;
     qrError.hidden = false;
     qrError.textContent = "QR library is still loading. Refresh if it does not appear.";
     return;
   }
   try {
-    await QRCode.toCanvas(qrCanvas, payload, {
-      width: 280,
-      margin: 2,
-      errorCorrectionLevel: state.qrMode === "direct" ? "M" : "Q",
-      color: { dark: "#000000", light: "#ffffff" }
+    new QRious({
+      element: qrCanvas,
+      value: payload,
+      size: 280,
+      padding: 16,
+      level: state.qrMode === "direct" ? "M" : "Q",
+      foreground: "#000000",
+      background: "#ffffff"
     });
   } catch (error) {
     qrCanvas.hidden = true;
