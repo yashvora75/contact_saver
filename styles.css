@@ -180,8 +180,9 @@ input:focus {
 
 .phone-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(130px, 0.55fr) minmax(82px, 110px) minmax(180px, 1fr) 44px 44px;
   gap: 10px;
+  align-items: center;
 }
 
 .form-actions, .share-links {
@@ -192,7 +193,7 @@ input:focus {
   margin-top: 18px;
 }
 
-.primary-button, .ghost-button, .icon-button, .share-links a, .text-button {
+.primary-button, .ghost-button, .icon-button, .share-links a, .text-button, .circle-button {
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 42px;
@@ -207,7 +208,7 @@ input:focus {
   color: var(--primary-ink);
 }
 
-.ghost-button, .icon-button, .share-links a, .text-button {
+.ghost-button, .icon-button, .share-links a, .text-button, .circle-button {
   background: #fff;
   color: var(--ink);
 }
@@ -218,7 +219,30 @@ input:focus {
   color: var(--primary);
 }
 
-.icon-button:disabled {
+.circle-button {
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  color: var(--primary);
+}
+
+.circle-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 2.4;
+}
+
+.remove-phone {
+  color: var(--danger);
+}
+
+.icon-button:disabled, .circle-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -321,7 +345,11 @@ input:focus {
   }
 
   .phone-row {
-    grid-template-columns: 1fr;
+    grid-template-columns: minmax(0, 1fr) minmax(86px, 0.35fr) 44px 44px;
+  }
+
+  .phone-number-input {
+    grid-column: 1 / -1;
   }
 
   h1 {
@@ -331,6 +359,17 @@ input:focus {
   .share-links > * {
     flex: 1 1 100%;
     text-align: center;
+  }
+}
+
+@media (max-width: 520px) {
+  .phone-row {
+    grid-template-columns: minmax(0, 1fr) 44px 44px;
+  }
+
+  .country-code-input,
+  .phone-number-input {
+    grid-column: 1 / -1;
   }
 }
 

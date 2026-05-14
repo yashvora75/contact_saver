@@ -1,5 +1,5 @@
 const STORAGE_KEY = "contactSaverCards";
-const QR_VERSION = "simple-4";
+const QR_VERSION = "phone-labels-5";
 
 const state = {
   contacts: [],
@@ -33,6 +33,13 @@ function fileSafeName(value) {
     .slice(0, 64) || "contact";
 }
 
+function downloadSafeName(value) {
+  return clean(value)
+    .replace(/[\\/:*?"<>|]+/g, "")
+    .replace(/\s+/g, " ")
+    .trim() || "Contact";
+}
+
 function initials(name) {
   return clean(name).split(/\s+/).filter(Boolean).slice(0, 2)
     .map(part => part[0].toUpperCase()).join("") || "CS";
@@ -60,9 +67,45 @@ function escapeVCard(value) {
     .replace(/;/g, "\\;");
 }
 
-function normalizePhones(contact) {
-  const values = Array.isArray(contact.phones) ? contact.phones : [contact.phone];
-  return values.map(clean).filter(Boolean);
+function splitLegacyPhone(value) {
+  const text = clean(value);
+  const match = text.match(/^(\+\d{1,4})[\s-]*(.*)$/);
+  if (!match) return { label: "Mobile", countryCode: "+91", number: text };
+  return { label: "Mobile", countryCode: match[1], number: match[2] };
+}
+
+function normalizePhoneEntry(entry, index = 0) {
+  if (typeof entry === "string") return splitLegacyPhone(entry);
+  const label = clean(entry?.label) || (index === 0 ? "Mobile" : "");
+  return {
+    label,
+    countryCode: clean(entry?.countryCode) || "+91",
+    number: clean(entry?.number || entry?.phone)
+  };
+}
+
+function normalizePhoneEntries(contact) {
+  const rawEntries = Array.isArray(contact.phones) ? contact.phones : [contact.phone];
+  const entries = rawEntries.map(normalizePhoneEntry);
+  return entries.length ? entries : [{ label: "Mobile", countryCode: "+91", number: "" }];
+}
+
+function fullPhone(entry) {
+  const phone = normalizePhoneEntry(entry);
+  const number = clean(phone.number);
+  const countryCode = clean(phone.countryCode);
+  if (!number) return "";
+  if (number.startsWith("+")) return number;
+  return [countryCode, number].filter(Boolean).join(" ");
+}
+
+function vcardPhoneType(label) {
+  const value = clean(label).toLowerCase();
+  if (value.includes("landline") || value.includes("office") || value.includes("work") || value.includes("department") || value.includes("sales") || value.includes("marketing")) {
+    return "WORK,VOICE";
+  }
+  if (value.includes("home") || value.includes("personal")) return "HOME,VOICE";
+  return "CELL";
 }
 
 function normalizeContact(contact) {
@@ -71,7 +114,7 @@ function normalizeContact(contact) {
     fullName: clean(contact.fullName),
     role: clean(contact.role),
     company: clean(contact.company),
-    phones: normalizePhones(contact),
+    phones: normalizePhoneEntries(contact),
     email: clean(contact.email).toLowerCase(),
     website: clean(contact.website),
     address: clean(contact.address),
@@ -92,8 +135,13 @@ function vcardFor(contact) {
 
   if (contact.company) lines.push(`ORG:${escapeVCard(contact.company)}`);
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
-  normalizePhones(contact).forEach(phone => {
-    lines.push(`TEL;TYPE=CELL:${escapeVCard(phone)}`);
+  normalizePhoneEntries(contact).forEach((entry, index) => {
+    const phone = fullPhone(entry);
+    if (!phone) return;
+    const item = `item${index + 1}`;
+    const label = clean(entry.label) || "Mobile";
+    lines.push(`${item}.TEL;TYPE=${vcardPhoneType(label)}:${escapeVCard(phone)}`);
+    lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
   if (contact.website) lines.push(`URL:${escapeVCard(contact.website)}`);
@@ -113,7 +161,7 @@ function loadContacts() {
     fullName: "Aanya Shah",
     role: "Founder",
     company: "Brill Brains Consulting",
-    phones: ["+91 98765 43210"],
+    phones: [{ label: "Mobile", countryCode: "+91", number: "98765 43210" }],
     email: "aanya@brillbrains.example",
     website: "https://brillbrains.example",
     address: "Mumbai, Maharashtra, India",
@@ -128,19 +176,41 @@ function loadContacts() {
 }
 
 function phoneValuesFromForm() {
-  return [...form.querySelectorAll('input[name="phones"]')]
-    .map(input => clean(input.value))
-    .filter(Boolean);
+  return [...form.querySelectorAll(".phone-row")]
+    .map((row, index) => normalizePhoneEntry({
+      label: row.querySelector('input[name="phoneLabels"]')?.value || (index === 0 ? "Mobile" : ""),
+      countryCode: row.querySelector('input[name="countryCodes"]')?.value || "+91",
+      number: row.querySelector('input[name="phoneNumbers"]')?.value || ""
+    }, index))
+    .filter(entry => fullPhone(entry));
 }
 
-function renderPhoneFields(phones = [""]) {
-  const values = phones.length ? phones : [""];
-  phoneFields.innerHTML = values.map((phone, index) => `
+function addIcon() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>';
+}
+
+function deleteIcon() {
+  return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M7 6l1 14h8l1-14M10 11v5M14 11v5"/></svg>';
+}
+
+function phoneRowHtml(entry = {}, index = 0, rowCount = 1) {
+  const phone = normalizePhoneEntry(entry, index);
+  const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales department, Marketing";
+  const labelValue = phone.label || (index === 0 ? "Mobile" : "");
+  return `
     <div class="phone-row">
-      <input name="phones" value="${escapeHtml(phone)}" placeholder="+91 98765 43210" autocomplete="tel">
-      <button class="icon-button remove-phone" type="button" aria-label="Remove phone number" ${values.length === 1 ? "disabled" : ""}>Remove</button>
+      <input class="phone-label-input" name="phoneLabels" value="${escapeHtml(labelValue)}" placeholder="${escapeHtml(labelPlaceholder)}" aria-label="Phone label">
+      <input class="country-code-input" name="countryCodes" value="${escapeHtml(phone.countryCode)}" placeholder="+91" list="countryCodes" aria-label="Country code">
+      <input class="phone-number-input" name="phoneNumbers" value="${escapeHtml(phone.number)}" placeholder="9820942844" autocomplete="tel" aria-label="Phone number">
+      <button class="circle-button add-phone" type="button" aria-label="Add phone number">${addIcon()}</button>
+      <button class="circle-button remove-phone" type="button" aria-label="Remove phone number" ${rowCount === 1 ? "disabled" : ""}>${deleteIcon()}</button>
     </div>
-  `).join("");
+  `;
+}
+
+function renderPhoneFields(phones = []) {
+  const values = normalizePhoneEntries({ phones });
+  phoneFields.innerHTML = values.map((phone, index) => phoneRowHtml(phone, index, values.length)).join("");
 }
 
 function fillForm(contact = {}) {
@@ -151,7 +221,7 @@ function fillForm(contact = {}) {
   form.email.value = contact.email || "";
   form.website.value = contact.website || "";
   form.address.value = contact.address || "";
-  renderPhoneFields(normalizePhones(contact));
+  renderPhoneFields(normalizePhoneEntries(contact));
 }
 
 function contactFromForm() {
@@ -247,11 +317,68 @@ async function drawQr(canvas, contact, size, padding) {
   });
 }
 
+function findQrBounds(canvas) {
+  const context = canvas.getContext("2d");
+  const { width, height } = canvas;
+  const pixels = context.getImageData(0, 0, width, height).data;
+  let minX = width;
+  let minY = height;
+  let maxX = -1;
+  let maxY = -1;
+
+  for (let y = 0; y < height; y += 1) {
+    for (let x = 0; x < width; x += 1) {
+      const index = (y * width + x) * 4;
+      if (pixels[index] < 96 && pixels[index + 1] < 96 && pixels[index + 2] < 96) {
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+  }
+
+  if (maxX < 0 || maxY < 0) return null;
+  return {
+    x: minX,
+    y: minY,
+    width: maxX - minX + 1,
+    height: maxY - minY + 1
+  };
+}
+
+async function drawCenteredQr(canvas, contact, size, quietZone) {
+  const source = document.createElement("canvas");
+  await drawQr(source, contact, size - quietZone * 2, null);
+  const bounds = findQrBounds(source);
+  const context = canvas.getContext("2d");
+  canvas.width = size;
+  canvas.height = size;
+  context.imageSmoothingEnabled = false;
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, size, size);
+
+  if (!bounds) return;
+  const x = Math.round((size - bounds.width) / 2);
+  const y = Math.round((size - bounds.height) / 2);
+  context.drawImage(
+    source,
+    bounds.x,
+    bounds.y,
+    bounds.width,
+    bounds.height,
+    x,
+    y,
+    bounds.width,
+    bounds.height
+  );
+}
+
 async function renderQr(contact) {
   qrError.hidden = true;
   qrCanvas.hidden = false;
   try {
-    await drawQr(qrCanvas, contact, 320, 18);
+    await drawQr(qrCanvas, contact, 320, null);
   } catch (error) {
     qrCanvas.hidden = true;
     qrError.hidden = false;
@@ -260,8 +387,15 @@ async function renderQr(contact) {
 }
 
 function phoneSummary(contact) {
-  const phones = normalizePhones(contact);
+  const phones = normalizePhoneEntries(contact).map(fullPhone).filter(Boolean);
   return phones.length ? phones.join(" / ") : "No phone added";
+}
+
+function phoneLabelSummary(contact) {
+  return normalizePhoneEntries(contact)
+    .filter(entry => fullPhone(entry))
+    .map(entry => `${clean(entry.label) || "Mobile"}: ${fullPhone(entry)}`)
+    .join(" / ") || "No phone added";
 }
 
 function renderPreview() {
@@ -279,7 +413,7 @@ function renderPreview() {
     <div class="avatar">${escapeHtml(initials(contact.fullName))}</div>
     <h3>${escapeHtml(contact.fullName)}</h3>
     <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
-    <p>${escapeHtml(phoneSummary(contact))}</p>
+    <p>${escapeHtml(phoneLabelSummary(contact))}</p>
   `;
   updateVcfLink(contact);
   renderQr(contact);
@@ -299,7 +433,7 @@ function renderList() {
         <div>
           <h3>${escapeHtml(contact.fullName)}</h3>
           <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
-          <p>${escapeHtml(phoneSummary(contact))}</p>
+          <p>${escapeHtml(phoneLabelSummary(contact))}</p>
         </div>
       </div>
       <div class="contact-actions">
@@ -325,22 +459,31 @@ function selectContact(contact) {
 }
 
 phoneFields.addEventListener("click", event => {
+  const addButton = event.target.closest(".add-phone");
+  if (addButton) {
+    const nextIndex = phoneFields.querySelectorAll(".phone-row").length;
+    phoneFields.insertAdjacentHTML("beforeend", phoneRowHtml({ label: "", countryCode: "+91", number: "" }, nextIndex, nextIndex + 1));
+    phoneFields.querySelectorAll(".remove-phone").forEach(button => {
+      button.disabled = false;
+    });
+    phoneFields.querySelector(".phone-row:last-child .phone-label-input")?.focus();
+    return;
+  }
+
   const button = event.target.closest(".remove-phone");
   if (!button) return;
   button.closest(".phone-row")?.remove();
-  if (!phoneFields.querySelector(".phone-row")) renderPhoneFields([""]);
+  const rows = phoneFields.querySelectorAll(".phone-row");
+  if (!rows.length) renderPhoneFields([{ label: "Mobile", countryCode: "+91", number: "" }]);
+  if (rows.length === 1) rows[0].querySelector(".remove-phone").disabled = true;
 });
 
-addPhoneButton.addEventListener("click", () => {
-  const row = document.createElement("div");
-  row.className = "phone-row";
-  row.innerHTML = `
-    <input name="phones" placeholder="+91 98765 43210" autocomplete="tel">
-    <button class="icon-button remove-phone" type="button" aria-label="Remove phone number">Remove</button>
-  `;
-  phoneFields.appendChild(row);
-  row.querySelector("input").focus();
-});
+if (addPhoneButton) {
+  addPhoneButton.addEventListener("click", () => {
+    phoneFields.insertAdjacentHTML("beforeend", phoneRowHtml({ label: "", countryCode: "+91", number: "" }, phoneFields.querySelectorAll(".phone-row").length, 2));
+    phoneFields.querySelector(".phone-row:last-child .phone-label-input")?.focus();
+  });
+}
 
 form.addEventListener("submit", event => {
   event.preventDefault();
@@ -401,9 +544,9 @@ document.querySelector("#downloadQr").addEventListener("click", async () => {
   if (!contact) return;
   try {
     const canvas = document.createElement("canvas");
-    await drawQr(canvas, contact, 1800, 100);
+    await drawCenteredQr(canvas, contact, 1800, 126);
     const link = document.createElement("a");
-    link.download = `${fileSafeName(contact.fullName)}-qr-hd.png`;
+    link.download = `${downloadSafeName(contact.fullName)}_Contact-Qr.png`;
     link.href = canvas.toDataURL("image/png");
     link.click();
   } catch (error) {

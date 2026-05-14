@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=simple-4">
-  <script defer src="qrious.min.js?v=simple-4"></script>
-  <script defer src="app.js?v=simple-4"></script>
+  <link rel="stylesheet" href="styles.css?v=phone-labels-5">
+  <script defer src="qrious.min.js?v=phone-labels-5"></script>
+  <script defer src="app.js?v=phone-labels-5"></script>
 </head>
 <body>
   <header class="topbar">
@@ -64,9 +64,20 @@
             <div class="wide phone-section">
               <div class="label-row">
                 <span>Phone numbers</span>
-                <button class="text-button" type="button" id="addPhone">Add 1 More Number</button>
               </div>
               <div id="phoneFields" class="phone-fields"></div>
+              <datalist id="countryCodes">
+                <option value="+91">India</option>
+                <option value="+1">United States / Canada</option>
+                <option value="+44">United Kingdom</option>
+                <option value="+61">Australia</option>
+                <option value="+971">United Arab Emirates</option>
+                <option value="+65">Singapore</option>
+                <option value="+81">Japan</option>
+                <option value="+49">Germany</option>
+                <option value="+33">France</option>
+                <option value="+39">Italy</option>
+              </datalist>
             </div>
           </div>
 
