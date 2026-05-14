@@ -1,17 +1,19 @@
 const STORAGE_KEY = "contactSaverCards";
-const DEFAULT_BASE_URL = "https://yashvora75.github.io/contact_saver";
+const QR_VERSION = "simple-4";
 
 const state = {
   contacts: [],
-  selected: null,
-  qrMode: "direct"
+  selected: null
 };
 
+const createView = document.querySelector("#createView");
+const savedView = document.querySelector("#savedView");
 const form = document.querySelector("#contactForm");
+const phoneFields = document.querySelector("#phoneFields");
+const addPhoneButton = document.querySelector("#addPhone");
 const listEl = document.querySelector("#contactList");
 const countEl = document.querySelector("#contactCount");
 const messageEl = document.querySelector("#formMessage");
-const baseUrlEl = document.querySelector("#baseUrl");
 const qrCanvas = document.querySelector("#qrCanvas");
 const qrError = document.querySelector("#qrError");
 const previewCard = document.querySelector("#previewCard");
@@ -22,8 +24,9 @@ function clean(value) {
   return String(value || "").trim();
 }
 
-function slugify(value) {
-  return clean(value).toLowerCase()
+function fileSafeName(value) {
+  return clean(value)
+    .toLowerCase()
     .replace(/&/g, " and ")
     .replace(/[^a-z0-9]+/g, "-")
     .replace(/^-+|-+$/g, "")
@@ -57,6 +60,25 @@ function escapeVCard(value) {
     .replace(/;/g, "\\;");
 }
 
+function normalizePhones(contact) {
+  const values = Array.isArray(contact.phones) ? contact.phones : [contact.phone];
+  return values.map(clean).filter(Boolean);
+}
+
+function normalizeContact(contact) {
+  return {
+    id: contact.id || crypto.randomUUID(),
+    fullName: clean(contact.fullName),
+    role: clean(contact.role),
+    company: clean(contact.company),
+    phones: normalizePhones(contact),
+    email: clean(contact.email).toLowerCase(),
+    website: clean(contact.website),
+    address: clean(contact.address),
+    updatedAt: contact.updatedAt || new Date().toISOString()
+  };
+}
+
 function vcardFor(contact) {
   const names = clean(contact.fullName).split(/\s+/).filter(Boolean);
   const lastName = names.length > 1 ? names[names.length - 1] : "";
@@ -67,36 +89,17 @@ function vcardFor(contact) {
     `N:${escapeVCard(lastName)};${escapeVCard(firstName)};;;`,
     `FN:${escapeVCard(contact.fullName)}`
   ];
+
   if (contact.company) lines.push(`ORG:${escapeVCard(contact.company)}`);
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
-  if (contact.phone) lines.push(`TEL;TYPE=CELL:${escapeVCard(contact.phone)}`);
+  normalizePhones(contact).forEach(phone => {
+    lines.push(`TEL;TYPE=CELL:${escapeVCard(phone)}`);
+  });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
   if (contact.website) lines.push(`URL:${escapeVCard(contact.website)}`);
   if (contact.address) lines.push(`ADR;TYPE=WORK:;;${escapeVCard(contact.address)};;;;`);
-  if (contact.notes) lines.push(`NOTE:${escapeVCard(contact.notes)}`);
   lines.push("END:VCARD");
   return lines.join("\r\n") + "\r\n";
-}
-
-function encodeCard(contact) {
-  const json = JSON.stringify(contact);
-  const bytes = new TextEncoder().encode(json);
-  let binary = "";
-  bytes.forEach(byte => { binary += String.fromCharCode(byte); });
-  return btoa(binary).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/g, "");
-}
-
-function baseUrl() {
-  return clean(baseUrlEl.value).replace(/\/+$/, "") || DEFAULT_BASE_URL;
-}
-
-function cardUrl(contact) {
-  const params = new URLSearchParams({ save: "1" });
-  return `${baseUrl()}/card.html?${params.toString()}#${encodeCard(contact)}`;
-}
-
-function qrPayload(contact) {
-  return state.qrMode === "direct" ? vcardFor(contact) : cardUrl(contact);
 }
 
 function saveContacts() {
@@ -105,22 +108,39 @@ function saveContacts() {
 
 function loadContacts() {
   const saved = JSON.parse(localStorage.getItem(STORAGE_KEY) || "null");
-  state.contacts = Array.isArray(saved) && saved.length ? saved : [{
+  const seed = [{
     id: crypto.randomUUID(),
-    slug: "aanya-shah",
     fullName: "Aanya Shah",
     role: "Founder",
     company: "Brill Brains Consulting",
-    phone: "+91 98765 43210",
+    phones: ["+91 98765 43210"],
     email: "aanya@brillbrains.example",
     website: "https://brillbrains.example",
     address: "Mumbai, Maharashtra, India",
-    notes: "Business strategy, operations, and growth systems.",
-    brandColor: "#1266F1",
     updatedAt: new Date().toISOString()
   }];
-  if (!saved) saveContacts();
+
+  state.contacts = (Array.isArray(saved) && saved.length ? saved : seed)
+    .map(normalizeContact)
+    .filter(contact => contact.fullName);
   state.selected = state.contacts[0] || null;
+  saveContacts();
+}
+
+function phoneValuesFromForm() {
+  return [...form.querySelectorAll('input[name="phones"]')]
+    .map(input => clean(input.value))
+    .filter(Boolean);
+}
+
+function renderPhoneFields(phones = [""]) {
+  const values = phones.length ? phones : [""];
+  phoneFields.innerHTML = values.map((phone, index) => `
+    <div class="phone-row">
+      <input name="phones" value="${escapeHtml(phone)}" placeholder="+91 98765 43210" autocomplete="tel">
+      <button class="icon-button remove-phone" type="button" aria-label="Remove phone number" ${values.length === 1 ? "disabled" : ""}>Remove</button>
+    </div>
+  `).join("");
 }
 
 function fillForm(contact = {}) {
@@ -128,13 +148,10 @@ function fillForm(contact = {}) {
   form.fullName.value = contact.fullName || "";
   form.role.value = contact.role || "";
   form.company.value = contact.company || "";
-  form.phone.value = contact.phone || "";
   form.email.value = contact.email || "";
   form.website.value = contact.website || "";
-  form.brandColor.value = contact.brandColor || "#1266F1";
-  form.slug.value = contact.slug || "";
   form.address.value = contact.address || "";
-  form.notes.value = contact.notes || "";
+  renderPhoneFields(normalizePhones(contact));
 }
 
 function contactFromForm() {
@@ -142,18 +159,16 @@ function contactFromForm() {
   const existing = state.contacts.find(contact => contact.id === data.id);
   const fullName = clean(data.fullName);
   if (!fullName) throw new Error("Full name is required");
+
   return {
     id: existing?.id || crypto.randomUUID(),
-    slug: slugify(data.slug || fullName),
     fullName,
     role: clean(data.role),
     company: clean(data.company),
-    phone: clean(data.phone),
+    phones: phoneValuesFromForm(),
     email: clean(data.email).toLowerCase(),
     website: clean(data.website),
-    brandColor: /^#[0-9a-fA-F]{6}$/.test(data.brandColor) ? data.brandColor : "#1266F1",
     address: clean(data.address),
-    notes: clean(data.notes),
     updatedAt: new Date().toISOString()
   };
 }
@@ -164,29 +179,7 @@ function updateVcfLink(contact) {
   const url = URL.createObjectURL(blob);
   downloadVcf.dataset.url = url;
   downloadVcf.href = url;
-  downloadVcf.download = `${contact.slug || "contact"}.vcf`;
-}
-
-async function renderQr(contact) {
-  qrError.hidden = true;
-  qrCanvas.hidden = false;
-  const payload = qrPayload(contact);
-  try {
-    await waitForQrLibrary();
-    new QRious({
-      element: qrCanvas,
-      value: payload,
-      size: 280,
-      padding: 16,
-      level: state.qrMode === "direct" ? "M" : "Q",
-      foreground: "#000000",
-      background: "#ffffff"
-    });
-  } catch (error) {
-    qrCanvas.hidden = true;
-    qrError.hidden = false;
-    qrError.textContent = error.message;
-  }
+  downloadVcf.download = `${fileSafeName(contact.fullName)}.vcf`;
 }
 
 function waitForQrLibrary() {
@@ -228,7 +221,7 @@ function waitForQrLibrary() {
     }
 
     const script = document.createElement("script");
-    script.src = "qrious.min.js?v=qr-fix-3";
+    script.src = `qrious.min.js?v=${QR_VERSION}`;
     script.defer = true;
     script.addEventListener("load", finishIfReady, { once: true });
     script.addEventListener("error", () => {
@@ -241,22 +234,52 @@ function waitForQrLibrary() {
   return qrLibraryPromise;
 }
 
+async function drawQr(canvas, contact, size, padding) {
+  await waitForQrLibrary();
+  new QRious({
+    element: canvas,
+    value: vcardFor(contact),
+    size,
+    padding,
+    level: "M",
+    foreground: "#000000",
+    background: "#ffffff"
+  });
+}
+
+async function renderQr(contact) {
+  qrError.hidden = true;
+  qrCanvas.hidden = false;
+  try {
+    await drawQr(qrCanvas, contact, 320, 18);
+  } catch (error) {
+    qrCanvas.hidden = true;
+    qrError.hidden = false;
+    qrError.textContent = error.message;
+  }
+}
+
+function phoneSummary(contact) {
+  const phones = normalizePhones(contact);
+  return phones.length ? phones.join(" / ") : "No phone added";
+}
+
 function renderPreview() {
   const contact = state.selected || state.contacts[0];
   if (!contact) {
     previewCard.innerHTML = `
       <div class="avatar">CS</div>
       <h3>Select a card</h3>
-      <p>Create a contact to preview the public card.</p>
+      <p>Create a contact to preview the QR details.</p>
     `;
     return;
   }
 
   previewCard.innerHTML = `
-    <div class="avatar" style="background:${escapeHtml(contact.brandColor)}">${escapeHtml(initials(contact.fullName))}</div>
+    <div class="avatar">${escapeHtml(initials(contact.fullName))}</div>
     <h3>${escapeHtml(contact.fullName)}</h3>
-    <p>${escapeHtml(titleLine(contact) || contact.email || contact.phone || "Digital contact")}</p>
-    ${contact.notes ? `<p>${escapeHtml(contact.notes)}</p>` : ""}
+    <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
+    <p>${escapeHtml(phoneSummary(contact))}</p>
   `;
   updateVcfLink(contact);
   renderQr(contact);
@@ -266,33 +289,58 @@ function renderList() {
   countEl.textContent = `${state.contacts.length} card${state.contacts.length === 1 ? "" : "s"}`;
   if (!state.contacts.length) {
     listEl.innerHTML = '<p class="muted">No cards yet.</p>';
-    renderPreview();
     return;
   }
+
   listEl.innerHTML = state.contacts.map(contact => `
     <article class="contact-item" data-id="${escapeHtml(contact.id)}">
       <div class="contact-main">
-        <div class="avatar" style="background:${escapeHtml(contact.brandColor)}">${escapeHtml(initials(contact.fullName))}</div>
+        <div class="avatar">${escapeHtml(initials(contact.fullName))}</div>
         <div>
           <h3>${escapeHtml(contact.fullName)}</h3>
-          <p>${escapeHtml(titleLine(contact) || contact.email || contact.phone || contact.slug)}</p>
+          <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
+          <p>${escapeHtml(phoneSummary(contact))}</p>
         </div>
       </div>
       <div class="contact-actions">
         <button class="icon-button" type="button" data-action="select">Preview</button>
         <button class="icon-button" type="button" data-action="edit">Edit</button>
-        <button class="icon-button" type="button" data-action="copy">Copy Link</button>
         <button class="icon-button danger" type="button" data-action="delete">Delete</button>
       </div>
     </article>
   `).join("");
-  renderPreview();
+}
+
+function showView() {
+  const showSaved = location.hash === "#saved";
+  createView.hidden = showSaved;
+  savedView.hidden = !showSaved;
+  document.body.classList.toggle("saved-active", showSaved);
+  if (showSaved) renderList();
 }
 
 function selectContact(contact) {
   state.selected = contact;
   renderPreview();
 }
+
+phoneFields.addEventListener("click", event => {
+  const button = event.target.closest(".remove-phone");
+  if (!button) return;
+  button.closest(".phone-row")?.remove();
+  if (!phoneFields.querySelector(".phone-row")) renderPhoneFields([""]);
+});
+
+addPhoneButton.addEventListener("click", () => {
+  const row = document.createElement("div");
+  row.className = "phone-row";
+  row.innerHTML = `
+    <input name="phones" placeholder="+91 98765 43210" autocomplete="tel">
+    <button class="icon-button remove-phone" type="button" aria-label="Remove phone number">Remove</button>
+  `;
+  phoneFields.appendChild(row);
+  row.querySelector("input").focus();
+});
 
 form.addEventListener("submit", event => {
   event.preventDefault();
@@ -307,7 +355,8 @@ form.addEventListener("submit", event => {
     saveContacts();
     fillForm(contact);
     renderList();
-    messageEl.textContent = "Saved locally. QR updated.";
+    renderPreview();
+    messageEl.textContent = "Saved. QR updated.";
   } catch (error) {
     messageEl.style.color = "var(--danger)";
     messageEl.textContent = error.message;
@@ -321,64 +370,52 @@ document.querySelector("#resetForm").addEventListener("click", () => {
   renderPreview();
 });
 
-document.querySelector(".segmented").addEventListener("click", event => {
-  const button = event.target.closest("button[data-mode]");
-  if (!button) return;
-  state.qrMode = button.dataset.mode;
-  document.querySelectorAll(".segmented button").forEach(item => {
-    item.classList.toggle("active", item === button);
-  });
-  renderPreview();
-});
-
-listEl.addEventListener("click", async event => {
+listEl.addEventListener("click", event => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const item = event.target.closest(".contact-item");
   const contact = state.contacts.find(candidate => candidate.id === item.dataset.id);
   if (!contact) return;
-  if (button.dataset.action === "select") selectContact(contact);
+
+  if (button.dataset.action === "select") {
+    selectContact(contact);
+    location.hash = "";
+  }
   if (button.dataset.action === "edit") {
     selectContact(contact);
     fillForm(contact);
+    location.hash = "";
     window.scrollTo({ top: 0, behavior: "smooth" });
-  }
-  if (button.dataset.action === "copy") {
-    await navigator.clipboard.writeText(cardUrl(contact));
-    button.textContent = "Copied";
-    setTimeout(() => { button.textContent = "Copy Link"; }, 1200);
   }
   if (button.dataset.action === "delete") {
     state.contacts = state.contacts.filter(candidate => candidate.id !== contact.id);
     if (state.selected?.id === contact.id) state.selected = state.contacts[0] || null;
     saveContacts();
     renderList();
+    renderPreview();
   }
 });
 
-baseUrlEl.addEventListener("input", () => {
-  localStorage.setItem("contactSaverBaseUrl", baseUrlEl.value);
-  renderPreview();
-});
-
-document.querySelector("#copyTarget").addEventListener("click", async () => {
+document.querySelector("#downloadQr").addEventListener("click", async () => {
   const contact = state.selected || state.contacts[0];
   if (!contact) return;
-  await navigator.clipboard.writeText(qrPayload(contact));
-  messageEl.style.color = "var(--success)";
-  messageEl.textContent = state.qrMode === "direct" ? "vCard payload copied." : "Card link copied.";
+  try {
+    const canvas = document.createElement("canvas");
+    await drawQr(canvas, contact, 1800, 100);
+    const link = document.createElement("a");
+    link.download = `${fileSafeName(contact.fullName)}-qr-hd.png`;
+    link.href = canvas.toDataURL("image/png");
+    link.click();
+  } catch (error) {
+    qrError.hidden = false;
+    qrError.textContent = error.message;
+  }
 });
 
-document.querySelector("#downloadQr").addEventListener("click", () => {
-  const contact = state.selected || state.contacts[0];
-  if (!contact) return;
-  const link = document.createElement("a");
-  link.download = `${contact.slug || "contact"}-qr.png`;
-  link.href = qrCanvas.toDataURL("image/png");
-  link.click();
-});
+window.addEventListener("hashchange", showView);
 
-baseUrlEl.value = localStorage.getItem("contactSaverBaseUrl") || DEFAULT_BASE_URL;
 loadContacts();
 fillForm(state.selected);
 renderList();
+renderPreview();
+showView();

@@ -1,23 +1,20 @@
 # Contact Saver
 
-A static GitHub Pages prototype for creating a digital contact card and QR code.
+A static GitHub Pages app for creating contact-save QR codes.
 
-## Live URL
-
-After GitHub Pages is enabled for the repository, open:
+Live app:
 
 https://yashvora75.github.io/contact_saver/
 
-## How it works
+## What it does
 
-GitHub Pages cannot run a Node server or database. This version runs fully in the browser:
+- Creates a vCard QR code that opens a contact preview on iPhone and Android.
+- Supports multiple phone numbers in the same QR.
+- Saves cards locally in the browser.
+- Shows saved cards on a separate `#saved` page.
+- Downloads an HD PNG QR image and a `.vcf` file.
 
-- Create/edit a client contact card.
-- Generate a **Direct contact QR** containing the vCard data.
-- Generate a **Digital card QR** that opens a shareable card page.
-- Save contacts locally in the browser with `localStorage`.
-
-Phones do not allow a QR scan to silently write into Contacts without user confirmation. The reliable flow is that the phone opens a contact preview and the user taps **Add Contact**.
+Phones require the user to confirm adding a contact. iOS and Android do not allow a QR scan to silently save into Contacts.
 
 ## Local preview
 

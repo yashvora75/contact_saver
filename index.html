@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=qr-fix-3">
-  <script defer src="qrious.min.js?v=qr-fix-3"></script>
-  <script defer src="app.js?v=qr-fix-3"></script>
+  <link rel="stylesheet" href="styles.css?v=simple-4">
+  <script defer src="qrious.min.js?v=simple-4"></script>
+  <script defer src="app.js?v=simple-4"></script>
 </head>
 <body>
   <header class="topbar">
@@ -14,116 +14,102 @@
       <span class="brand-mark">CS</span>
       <span>
         <strong>Contact Saver</strong>
-        <small>Static QR contact cards</small>
+        <small>QR contact cards</small>
       </span>
     </a>
-    <span class="status-pill" id="contactCount">0 cards</span>
+    <nav class="top-actions" aria-label="Main navigation">
+      <a class="nav-link" href="./">Create</a>
+      <a class="status-pill" href="#saved" id="contactCount">0 cards</a>
+    </nav>
   </header>
 
-  <main class="workspace">
-    <section class="panel editor-panel" aria-labelledby="editorTitle">
-      <div class="panel-head">
-        <div>
-          <p class="eyebrow">Client card</p>
-          <h1 id="editorTitle">Create a QR that opens contact save</h1>
+  <main>
+    <section class="workspace" id="createView" aria-labelledby="editorTitle">
+      <div class="panel editor-panel">
+        <div class="panel-head">
+          <div>
+            <p class="eyebrow">Client contact</p>
+            <h1 id="editorTitle">Create a QR that opens contact save</h1>
+          </div>
+          <button class="ghost-button" type="button" id="resetForm">New</button>
         </div>
-        <button class="ghost-button" type="button" id="resetForm">New</button>
+
+        <form id="contactForm" class="contact-form">
+          <input type="hidden" name="id">
+          <div class="field-grid">
+            <label>
+              <span>Full name</span>
+              <input name="fullName" required placeholder="Aanya Shah" autocomplete="name">
+            </label>
+            <label>
+              <span>Role</span>
+              <input name="role" placeholder="Founder">
+            </label>
+            <label>
+              <span>Company</span>
+              <input name="company" placeholder="Brill Brains">
+            </label>
+            <label>
+              <span>Email</span>
+              <input name="email" type="email" placeholder="hello@example.com" autocomplete="email">
+            </label>
+            <label>
+              <span>Website</span>
+              <input name="website" placeholder="https://example.com" autocomplete="url">
+            </label>
+            <label>
+              <span>Address</span>
+              <input name="address" placeholder="City, state, country">
+            </label>
+            <div class="wide phone-section">
+              <div class="label-row">
+                <span>Phone numbers</span>
+                <button class="text-button" type="button" id="addPhone">Add 1 More Number</button>
+              </div>
+              <div id="phoneFields" class="phone-fields"></div>
+            </div>
+          </div>
+
+          <div class="form-actions">
+            <button class="primary-button" type="submit">Save Card</button>
+            <p id="formMessage" role="status"></p>
+          </div>
+        </form>
       </div>
 
-      <form id="contactForm" class="contact-form">
-        <input type="hidden" name="id">
-        <div class="field-grid">
-          <label>
-            <span>Full name</span>
-            <input name="fullName" required placeholder="Aanya Shah" autocomplete="name">
-          </label>
-          <label>
-            <span>Role</span>
-            <input name="role" placeholder="Founder">
-          </label>
-          <label>
-            <span>Company</span>
-            <input name="company" placeholder="Brill Brains">
-          </label>
-          <label>
-            <span>Phone</span>
-            <input name="phone" placeholder="+91 98765 43210" autocomplete="tel">
-          </label>
-          <label>
-            <span>Email</span>
-            <input name="email" type="email" placeholder="hello@example.com" autocomplete="email">
-          </label>
-          <label>
-            <span>Website</span>
-            <input name="website" placeholder="https://example.com" autocomplete="url">
-          </label>
-          <label>
-            <span>Brand color</span>
-            <input name="brandColor" type="color" value="#1266F1">
-          </label>
-          <label>
-            <span>Slug</span>
-            <input name="slug" placeholder="aanya-shah">
-          </label>
-          <label class="wide">
-            <span>Address</span>
-            <input name="address" placeholder="City, state, country">
-          </label>
-          <label class="wide">
-            <span>Notes</span>
-            <textarea name="notes" rows="3" placeholder="Short intro or service line"></textarea>
-          </label>
+      <aside class="panel qr-panel" aria-labelledby="qrTitle">
+        <div class="panel-head compact">
+          <div>
+            <p class="eyebrow">Live QR</p>
+            <h2 id="qrTitle">Scan to save contact</h2>
+          </div>
         </div>
 
-        <div class="form-actions">
-          <button class="primary-button" type="submit">Save Card</button>
-          <p id="formMessage" role="status"></p>
+        <div class="qr-box">
+          <canvas id="qrCanvas" width="320" height="320" aria-label="QR code"></canvas>
+          <p class="qr-error" id="qrError" hidden></p>
         </div>
-      </form>
+
+        <div class="share-links">
+          <button class="primary-button" type="button" id="downloadQr">Download HD PNG</button>
+          <a id="downloadVcf">Download VCF</a>
+        </div>
+
+        <div class="phone-card" id="previewCard">
+          <div class="avatar">CS</div>
+          <h3>Select a card</h3>
+          <p>Create a contact to preview the QR details.</p>
+        </div>
+      </aside>
     </section>
 
-    <aside class="panel qr-panel" aria-labelledby="qrTitle">
-      <div class="panel-head compact">
-        <div>
-          <p class="eyebrow">Live QR</p>
-          <h2 id="qrTitle">Scan target</h2>
-        </div>
-      </div>
-
-      <label class="base-url">
-        <span>GitHub Pages base URL</span>
-        <input id="baseUrl" spellcheck="false">
-      </label>
-
-      <div class="segmented" role="group" aria-label="QR destination">
-        <button type="button" class="active" data-mode="direct">Direct contact</button>
-        <button type="button" data-mode="card">Digital card</button>
-      </div>
-
-      <div class="qr-box">
-        <canvas id="qrCanvas" width="280" height="280" aria-label="QR code"></canvas>
-        <p class="qr-error" id="qrError" hidden></p>
-      </div>
-
-      <div class="share-links">
-        <button class="ghost-button" type="button" id="copyTarget">Copy Target</button>
-        <button class="ghost-button" type="button" id="downloadQr">Download QR</button>
-        <a id="downloadVcf">Download VCF</a>
-      </div>
-
-      <div class="phone-card" id="previewCard">
-        <div class="avatar">CS</div>
-        <h3>Select a card</h3>
-        <p>Create a contact to preview the public card.</p>
-      </div>
-    </aside>
-
-    <section class="panel list-panel" aria-labelledby="listTitle">
-      <div class="panel-head">
+    <section class="saved-page" id="savedView" aria-labelledby="savedTitle" hidden>
+      <div class="saved-head">
         <div>
           <p class="eyebrow">Saved locally</p>
-          <h2 id="listTitle">Client cards</h2>
+          <h1 id="savedTitle">Saved cards</h1>
         </div>
+        <a class="primary-button" href="./">Create New</a>
       </div>
       <div id="contactList" class="contact-list"></div>
     </section>
