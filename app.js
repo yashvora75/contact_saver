@@ -21,9 +21,6 @@ const qrCanvas = document.querySelector("#qrCanvas");
 const qrError = document.querySelector("#qrError");
 const previewCard = document.querySelector("#previewCard");
 const downloadVcf = document.querySelector("#downloadVcf");
-const photoInput = document.querySelector("#photoInput");
-const photoPreview = document.querySelector("#photoPreview");
-const removePhotoButton = document.querySelector("#removePhoto");
 const savedTitle = document.querySelector("#savedTitle");
 const deletedToggle = document.querySelector("#deletedToggle");
 let qrLibraryPromise = null;
@@ -61,9 +58,6 @@ function draftName() {
 }
 
 function avatarHtml(contact, extraClass = "") {
-  if (contact?.photoData) {
-    return `<div class="avatar photo-avatar ${extraClass}"><img src="${escapeHtml(contact.photoData)}" alt=""></div>`;
-  }
   return `<div class="avatar ${extraClass}">${escapeHtml(initials(contact?.fullName))}</div>`;
 }
 
@@ -92,18 +86,6 @@ function escapeVCard(value) {
     .replace(/\n/g, "\\n")
     .replace(/,/g, "\\,")
     .replace(/;/g, "\\;");
-}
-
-// vCard spec: fold lines longer than 75 chars with CRLF + space
-function foldVCardLine(line) {
-  if (line.length <= 75) return line;
-  const chunks = [line.slice(0, 75)];
-  let i = 75;
-  while (i < line.length) {
-    chunks.push(" " + line.slice(i, i + 74));
-    i += 74;
-  }
-  return chunks.join("\r\n");
 }
 
 function splitLegacyPhone(value) {
@@ -173,13 +155,12 @@ function normalizeContact(contact) {
     email: clean(contact.email).toLowerCase(),
     website: clean(contact.website),
     address: clean(contact.address),
-    photoData: clean(contact.photoData),
     deletedAt: contact.deletedAt || "",
     updatedAt: contact.updatedAt || new Date().toISOString()
   };
 }
 
-function vcardFor(contact, includePhoto = false) {
+function vcardFor(contact) {
   const names = clean(contact.fullName).split(/\s+/).filter(Boolean);
   const lastName = names.length > 1 ? names[names.length - 1] : "";
   const firstName = names.length > 1 ? names.slice(0, -1).join(" ") : contact.fullName;
@@ -192,11 +173,6 @@ function vcardFor(contact, includePhoto = false) {
 
   if (contact.company) lines.push(`ORG:${escapeVCard(contact.company)}`);
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
-
-  if (includePhoto && contact.photoData) {
-    const base64 = contact.photoData.replace(/^data:image\/\w+;base64,/, "");
-    lines.push(foldVCardLine(`PHOTO;ENCODING=b;TYPE=JPEG:${base64}`));
-  }
 
   normalizePhoneEntries(contact).forEach((entry, index) => {
     const phone = fullPhone(entry);
@@ -213,34 +189,6 @@ function vcardFor(contact, includePhoto = false) {
   return lines.join("\r\n") + "\r\n";
 }
 
-// Returns true when the app is served via HTTP (local server or hosted), not file://
-function isHosted() {
-  return location.protocol === "http:" || location.protocol === "https:";
-}
-
-// When hosted: QR encodes a server URL so the phone downloads the VCF with photo.
-// When not hosted (GitHub Pages / file://): QR encodes raw vCard text (no photo).
-function qrValueFor(contact) {
-  if (isHosted()) {
-    return `${location.origin}/c/${contact.id}`;
-  }
-  return vcardFor(contact);
-}
-
-// Push contact VCF (with photo) to the local server so /c/:id can serve it.
-async function pushToServer(contact) {
-  if (!isHosted()) return;
-  try {
-    await fetch("/api/contact", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ id: contact.id, vcf: vcardFor(contact, true) })
-    });
-  } catch {
-    // Server not running — silently ignore, QR still works via raw vCard fallback
-  }
-}
-
 function saveContacts() {
   persistLocal(STORAGE_KEY, state.contacts);
 }
@@ -255,7 +203,7 @@ function persistLocal(key, value) {
     return true;
   } catch {
     messageEl.style.color = "var(--danger)";
-    messageEl.textContent = "Storage is full. Remove a large photo or delete old cards, then try again.";
+    messageEl.textContent = "Storage is full. Delete old cards, then try again.";
     return false;
   }
 }
@@ -269,7 +217,6 @@ function hasMeaningfulContactData(contact) {
     clean(contact.email) ||
     clean(contact.website) ||
     clean(contact.address) ||
-    clean(contact.photoData) ||
     normalizePhoneEntries(contact).some(entry => fullPhone(entry))
   );
 }
@@ -282,7 +229,6 @@ function formHasContent() {
     clean(form.email.value) ||
     clean(form.website.value) ||
     clean(form.address.value) ||
-    clean(form.photoData.value) ||
     phoneValuesFromForm().length
   );
 }
@@ -294,7 +240,6 @@ function upsertContact(contact) {
     ? state.contacts.map(item => item.id === normalized.id ? normalized : item)
     : [normalized, ...state.contacts];
   saveContacts();
-  pushToServer(normalized);
   return normalized;
 }
 
@@ -439,8 +384,6 @@ function fillForm(contact = {}) {
   form.email.value = normalized.email || "";
   form.website.value = normalized.website || "";
   form.address.value = normalized.address || "";
-  form.photoData.value = normalized.photoData || "";
-  renderPhotoPreview(normalized.photoData);
   renderPhoneFields(normalizePhoneEntries(normalized));
   isHydratingForm = false;
 }
@@ -460,46 +403,12 @@ function contactFromForm(options = {}) {
     email: clean(data.email).toLowerCase(),
     website: clean(data.website),
     address: clean(data.address),
-    photoData: clean(data.photoData),
     updatedAt: new Date().toISOString()
   };
 }
 
-function renderPhotoPreview(photoData) {
-  if (photoData) {
-    photoPreview.innerHTML = `<img src="${escapeHtml(photoData)}" alt="">`;
-    photoPreview.classList.add("has-photo");
-    return;
-  }
-  photoPreview.textContent = "Photo";
-  photoPreview.classList.remove("has-photo");
-}
-
-function resizeImage(file) {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const image = new Image();
-      image.onload = () => {
-        const maxSize = 360;
-        const scale = Math.min(1, maxSize / Math.max(image.width, image.height));
-        const canvas = document.createElement("canvas");
-        canvas.width = Math.max(1, Math.round(image.width * scale));
-        canvas.height = Math.max(1, Math.round(image.height * scale));
-        const context = canvas.getContext("2d");
-        context.drawImage(image, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL("image/jpeg", 0.82));
-      };
-      image.onerror = reject;
-      image.src = reader.result;
-    };
-    reader.onerror = reject;
-    reader.readAsDataURL(file);
-  });
-}
-
 function updateVcfLink(contact) {
-  const blob = new Blob([vcardFor(contact, true)], { type: "text/vcard;charset=utf-8" });
+  const blob = new Blob([vcardFor(contact)], { type: "text/vcard;charset=utf-8" });
   if (downloadVcf.dataset.url) URL.revokeObjectURL(downloadVcf.dataset.url);
   const url = URL.createObjectURL(blob);
   downloadVcf.dataset.url = url;
@@ -563,7 +472,7 @@ async function drawQr(canvas, contact, size, padding) {
   await waitForQrLibrary();
   new QRious({
     element: canvas,
-    value: qrValueFor(contact),
+    value: vcardFor(contact),
     size,
     padding,
     level: "M",
@@ -882,39 +791,6 @@ form.addEventListener("input", () => {
 form.addEventListener("change", () => {
   repairPhoneAutofill();
   scheduleAutosave();
-});
-
-photoInput.addEventListener("change", async event => {
-  event.stopPropagation();
-  const file = photoInput.files?.[0];
-  if (!file) return;
-  try {
-    const photoData = await resizeImage(file);
-    form.photoData.value = photoData;
-    renderPhotoPreview(photoData);
-    clearTimeout(autosaveTimer);
-    const saved = autosaveCurrentForm();
-    if (saved) {
-      messageEl.style.color = "var(--success)";
-      messageEl.textContent = "Photo saved.";
-    }
-  } catch {
-    messageEl.style.color = "var(--danger)";
-    messageEl.textContent = "Could not load that photo.";
-  } finally {
-    photoInput.value = "";
-  }
-});
-
-removePhotoButton.addEventListener("click", () => {
-  clearTimeout(autosaveTimer);
-  form.photoData.value = "";
-  renderPhotoPreview("");
-  const saved = autosaveCurrentForm();
-  if (saved) {
-    messageEl.style.color = "var(--success)";
-    messageEl.textContent = "Photo removed.";
-  }
 });
 
 loadContacts();
