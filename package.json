@@ -1,0 +1,17 @@
+{
+  "name": "contact-saver",
+  "version": "2.0.0",
+  "description": "Static GitHub Pages digital card and QR contact saver prototype.",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "keywords": [
+    "github-pages",
+    "vcard",
+    "qr",
+    "digital-card"
+  ],
+  "author": "",
+  "license": "MIT"
+}
