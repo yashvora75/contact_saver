@@ -57,8 +57,12 @@ function draftName() {
   return `Untitled Contact ${stamp}`;
 }
 
+function contactDisplayName(contact) {
+  return clean(contact?.company) || clean(contact?.fullName) || clean(contact?.displayName) || draftName();
+}
+
 function avatarHtml(contact, extraClass = "") {
-  return `<div class="avatar ${extraClass}">${escapeHtml(initials(contact?.fullName))}</div>`;
+  return `<div class="avatar ${extraClass}">${escapeHtml(initials(contactDisplayName(contact)))}</div>`;
 }
 
 function initials(name) {
@@ -67,6 +71,7 @@ function initials(name) {
 }
 
 function titleLine(contact) {
+  if (contact.company) return clean(contact.role);
   return [contact.role, contact.company].filter(Boolean).join(" at ");
 }
 
@@ -136,13 +141,34 @@ function fullPhone(entry) {
   return [countryCode, number].filter(Boolean).join(" ");
 }
 
-function vcardPhoneType(label) {
+function vcardPhoneTypes(label) {
   const value = clean(label).toLowerCase();
   if (value.includes("landline") || value.includes("office") || value.includes("work") || value.includes("department") || value.includes("sales") || value.includes("marketing")) {
-    return "WORK,VOICE";
+    return ["WORK", "VOICE"];
   }
-  if (value.includes("home") || value.includes("personal")) return "HOME,VOICE";
-  return "CELL";
+  if (value.includes("home") || value.includes("personal")) return ["HOME", "VOICE"];
+  return ["CELL", "VOICE"];
+}
+
+function androidCustomPhoneType(label) {
+  const value = clean(label);
+  const lower = value.toLowerCase();
+  const standardLabels = ["", "mobile", "cell", "phone", "home", "work", "office", "landline"];
+  if (standardLabels.includes(lower)) return "";
+
+  const token = value
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/gi, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 32);
+
+  return token ? `X-${token}` : "";
+}
+
+function vcardPhoneParameters(label) {
+  const standardTypes = vcardPhoneTypes(label).join(",");
+  const customType = androidCustomPhoneType(label);
+  return customType ? `;TYPE=${customType}` : `;TYPE=${standardTypes}`;
 }
 
 function normalizeContact(contact) {
@@ -160,30 +186,63 @@ function normalizeContact(contact) {
   };
 }
 
+function contactNameParts(contact) {
+  const displayName = clean(contact.fullName) || clean(contact.company) || contactDisplayName(contact);
+  const parts = displayName.split(/\s+/).filter(Boolean);
+  if (parts.length <= 1) {
+    return {
+      displayName,
+      firstName: displayName,
+      middleName: "",
+      lastName: ""
+    };
+  }
+  if (parts.length === 2) {
+    return {
+      displayName,
+      firstName: parts[0],
+      middleName: "",
+      lastName: parts[1]
+    };
+  }
+  return {
+    displayName,
+    firstName: parts.slice(0, -2).join(" "),
+    middleName: parts[parts.length - 2],
+    lastName: parts[parts.length - 1]
+  };
+}
+
 function vcardFor(contact) {
-  const names = clean(contact.fullName).split(/\s+/).filter(Boolean);
-  const lastName = names.length > 1 ? names[names.length - 1] : "";
-  const firstName = names.length > 1 ? names.slice(0, -1).join(" ") : contact.fullName;
+  const name = contactNameParts(contact);
   const lines = [
     "BEGIN:VCARD",
     "VERSION:3.0",
-    `N:${escapeVCard(lastName)};${escapeVCard(firstName)};;;`,
-    `FN:${escapeVCard(contact.fullName)}`
+    `N:${escapeVCard(name.lastName)};${escapeVCard(name.firstName)};${escapeVCard(name.middleName)};;`,
+    `FN:${escapeVCard(name.displayName)}`
   ];
 
   if (contact.company) lines.push(`ORG:${escapeVCard(contact.company)}`);
+  if (contact.company) lines.push("X-ABShowAs:COMPANY");
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
 
-  normalizePhoneEntries(contact).forEach((entry, index) => {
+  let itemIndex = 1;
+  normalizePhoneEntries(contact).forEach(entry => {
     const phone = fullPhone(entry);
     if (!phone) return;
-    const item = `item${index + 1}`;
+    const item = `item${itemIndex}`;
+    itemIndex += 1;
     const label = clean(entry.label) || "Mobile";
-    lines.push(`${item}.TEL;TYPE=${vcardPhoneType(label)}:${escapeVCard(phone)}`);
+    lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
     lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
-  if (contact.website) lines.push(`URL:${escapeVCard(contact.website)}`);
+  if (contact.website) {
+    const item = `item${itemIndex}`;
+    itemIndex += 1;
+    lines.push(`${item}.URL:${escapeVCard(contact.website)}`);
+    lines.push(`${item}.X-ABLabel:Website`);
+  }
   if (contact.address) lines.push(`ADR;TYPE=WORK:;;${escapeVCard(contact.address)};;;;`);
   lines.push("END:VCARD");
   return lines.join("\r\n") + "\r\n";
@@ -287,10 +346,10 @@ function loadContacts() {
 
   state.contacts = (Array.isArray(saved) ? saved : [])
     .map(normalizeContact)
-    .filter(contact => contact.fullName);
+    .filter(hasMeaningfulContactData);
   state.deleted = (Array.isArray(deleted) ? deleted : [])
     .map(normalizeContact)
-    .filter(contact => contact.fullName);
+    .filter(hasMeaningfulContactData);
   state.selected = null;
   saveContacts();
   saveDeleted();
@@ -391,14 +450,15 @@ function fillForm(contact = {}) {
 function contactFromForm(options = {}) {
   const data = Object.fromEntries(new FormData(form).entries());
   const existing = state.contacts.find(contact => contact.id === data.id);
-  const fullName = clean(data.fullName) || (options.allowUntitled ? draftName() : "");
-  if (!fullName) throw new Error("Full name is required");
+  const fullName = clean(data.fullName);
+  const company = clean(data.company);
+  if (!fullName && !company && !options.allowUntitled) throw new Error("Add full name or company name");
 
   return {
     id: existing?.id || crypto.randomUUID(),
-    fullName,
+    fullName: fullName || (company ? "" : draftName()),
     role: clean(data.role),
-    company: clean(data.company),
+    company,
     phones: phoneValuesFromForm(),
     email: clean(data.email).toLowerCase(),
     website: clean(data.website),
@@ -413,7 +473,7 @@ function updateVcfLink(contact) {
   const url = URL.createObjectURL(blob);
   downloadVcf.dataset.url = url;
   downloadVcf.href = url;
-  downloadVcf.download = `${fileSafeName(contact.fullName)}.vcf`;
+  downloadVcf.download = `${fileSafeName(contactDisplayName(contact))}.vcf`;
 }
 
 function waitForQrLibrary() {
@@ -580,7 +640,7 @@ function renderPreview() {
 
   previewCard.innerHTML = `
     ${avatarHtml(contact)}
-    <h3>${escapeHtml(contact.fullName)}</h3>
+    <h3>${escapeHtml(contactDisplayName(contact))}</h3>
     <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
     <p>${escapeHtml(phoneLabelSummary(contact))}</p>
   `;
@@ -605,7 +665,7 @@ function renderList() {
       <div class="contact-main">
         ${avatarHtml(contact)}
         <div>
-          <h3>${escapeHtml(contact.fullName)}</h3>
+          <h3>${escapeHtml(contactDisplayName(contact))}</h3>
           <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
           <p>${escapeHtml(phoneLabelSummary(contact))}</p>
         </div>
@@ -637,8 +697,24 @@ function showView() {
 
 function selectContact(contact) {
   clearTimeout(autosaveTimer);
-  state.selected = contact;
+  const latest = state.contacts.find(candidate => candidate.id === contact.id) || contact;
+  state.selected = latest;
   renderPreview();
+  return latest;
+}
+
+function openContactInEditor(contact, message = "") {
+  clearTimeout(autosaveTimer);
+  const selected = selectContact(contact);
+  fillForm(selected);
+  messageEl.textContent = message;
+  if (message) messageEl.style.color = "var(--success)";
+  if (location.hash) {
+    location.hash = "";
+  } else {
+    showView();
+  }
+  window.scrollTo({ top: 0, behavior: "smooth" });
 }
 
 phoneFields.addEventListener("focusin", event => {
@@ -719,16 +795,10 @@ listEl.addEventListener("click", event => {
   if (!contact) return;
 
   if (button.dataset.action === "select") {
-    clearTimeout(autosaveTimer);
-    selectContact(contact);
-    location.hash = "";
+    openContactInEditor(contact);
   }
   if (button.dataset.action === "edit") {
-    clearTimeout(autosaveTimer);
-    selectContact(contact);
-    fillForm(contact);
-    location.hash = "";
-    window.scrollTo({ top: 0, behavior: "smooth" });
+    openContactInEditor(contact, "Editing saved card.");
   }
   if (button.dataset.action === "delete") {
     clearTimeout(autosaveTimer);
@@ -769,7 +839,7 @@ document.querySelector("#downloadQr").addEventListener("click", async () => {
     const canvas = document.createElement("canvas");
     await drawCenteredQr(canvas, contact, 1800, 126);
     const link = document.createElement("a");
-    link.download = `${downloadSafeName(contact.fullName)}_Contact-Qr.png`;
+    link.download = `${downloadSafeName(contactDisplayName(contact))}_Contact-Qr.png`;
     link.href = canvas.toDataURL("image/png");
     link.click();
   } catch (error) {
