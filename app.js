@@ -1,12 +1,14 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "stability-8";
+const QR_VERSION = "logo-qr-1";
 
 const state = {
   contacts: [],
   deleted: [],
   selected: null,
-  showingDeleted: false
+  showingDeleted: false,
+  qrLogoDataUrl: "",
+  qrLogoImage: null
 };
 
 const createView = document.querySelector("#createView");
@@ -19,6 +21,9 @@ const countEl = document.querySelector("#contactCount");
 const messageEl = document.querySelector("#formMessage");
 const qrCanvas = document.querySelector("#qrCanvas");
 const qrError = document.querySelector("#qrError");
+const qrLogoInput = document.querySelector("#qrLogo");
+const removeQrLogoButton = document.querySelector("#removeQrLogo");
+const logoMessage = document.querySelector("#logoMessage");
 const previewCard = document.querySelector("#previewCard");
 const downloadVcf = document.querySelector("#downloadVcf");
 const savedTitle = document.querySelector("#savedTitle");
@@ -535,10 +540,85 @@ async function drawQr(canvas, contact, size, padding) {
     value: vcardFor(contact),
     size,
     padding,
-    level: "M",
+    level: "H",
     foreground: "#000000",
     background: "#ffffff"
   });
+}
+
+function loadImage(source) {
+  return new Promise((resolve, reject) => {
+    const image = new Image();
+    image.onload = () => resolve(image);
+    image.onerror = () => reject(new Error("Image could not be loaded. Try a PNG or JPG file."));
+    image.src = source;
+  });
+}
+
+function readImageFile(file) {
+  return new Promise((resolve, reject) => {
+    if (!file) {
+      resolve("");
+      return;
+    }
+    if (!file.type.startsWith("image/")) {
+      reject(new Error("Choose an image file for the QR center."));
+      return;
+    }
+    if (file.size > 4 * 1024 * 1024) {
+      reject(new Error("Choose an image under 4 MB so the QR stays reliable."));
+      return;
+    }
+
+    const reader = new FileReader();
+    reader.onload = () => resolve(String(reader.result || ""));
+    reader.onerror = () => reject(new Error("Image could not be read."));
+    reader.readAsDataURL(file);
+  });
+}
+
+function roundedRect(context, x, y, width, height, radius) {
+  const r = Math.min(radius, width / 2, height / 2);
+  context.beginPath();
+  context.moveTo(x + r, y);
+  context.arcTo(x + width, y, x + width, y + height, r);
+  context.arcTo(x + width, y + height, x, y + height, r);
+  context.arcTo(x, y + height, x, y, r);
+  context.arcTo(x, y, x + width, y, r);
+  context.closePath();
+}
+
+function drawQrLogo(canvas, image) {
+  if (!image) return;
+  const context = canvas.getContext("2d");
+  const size = Math.min(canvas.width, canvas.height);
+  const logoSize = Math.round(size * 0.17);
+  const badgePadding = Math.round(size * 0.025);
+  const badgeSize = logoSize + badgePadding * 2;
+  const badgeX = Math.round((canvas.width - badgeSize) / 2);
+  const badgeY = Math.round((canvas.height - badgeSize) / 2);
+  const logoX = badgeX + badgePadding;
+  const logoY = badgeY + badgePadding;
+  const radius = Math.round(size * 0.025);
+
+  context.save();
+  context.fillStyle = "#ffffff";
+  roundedRect(context, badgeX, badgeY, badgeSize, badgeSize, radius);
+  context.fill();
+  context.strokeStyle = "rgba(23, 32, 51, 0.16)";
+  context.lineWidth = Math.max(1, Math.round(size * 0.004));
+  context.stroke();
+
+  const scale = Math.min(logoSize / image.naturalWidth, logoSize / image.naturalHeight);
+  const drawWidth = Math.round(image.naturalWidth * scale);
+  const drawHeight = Math.round(image.naturalHeight * scale);
+  const drawX = Math.round(logoX + (logoSize - drawWidth) / 2);
+  const drawY = Math.round(logoY + (logoSize - drawHeight) / 2);
+
+  roundedRect(context, logoX, logoY, logoSize, logoSize, Math.round(radius * 0.72));
+  context.clip();
+  context.drawImage(image, drawX, drawY, drawWidth, drawHeight);
+  context.restore();
 }
 
 function findQrBounds(canvas) {
@@ -571,7 +651,7 @@ function findQrBounds(canvas) {
   };
 }
 
-async function drawCenteredQr(canvas, contact, size, quietZone) {
+async function drawCenteredQr(canvas, contact, size, quietZone, logoImage = state.qrLogoImage) {
   const source = document.createElement("canvas");
   await drawQr(source, contact, size - quietZone * 2, null);
   const bounds = findQrBounds(source);
@@ -596,6 +676,7 @@ async function drawCenteredQr(canvas, contact, size, quietZone) {
     bounds.width,
     bounds.height
   );
+  drawQrLogo(canvas, logoImage);
 }
 
 async function renderQr(contact) {
@@ -603,11 +684,51 @@ async function renderQr(contact) {
   qrCanvas.hidden = false;
   try {
     await drawQr(qrCanvas, contact, 320, null);
+    drawQrLogo(qrCanvas, state.qrLogoImage);
   } catch (error) {
     qrCanvas.hidden = true;
     qrError.hidden = false;
     qrError.textContent = error.message;
   }
+}
+
+function companyDownloadLabel(contact) {
+  return clean(contact.company) || contactDisplayName(contact);
+}
+
+function drawCenteredCompanyName(context, text, width, y) {
+  const label = clean(text);
+  if (!label) return;
+  const maxWidth = width * 0.82;
+  let fontSize = 104;
+  context.fillStyle = "#172033";
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  context.font = `800 ${fontSize}px Inter, Arial, sans-serif`;
+
+  while (fontSize > 44 && context.measureText(label).width > maxWidth) {
+    fontSize -= 4;
+    context.font = `800 ${fontSize}px Inter, Arial, sans-serif`;
+  }
+
+  context.fillText(label, width / 2, y);
+}
+
+async function createQrDownloadCanvas(contact) {
+  const qrSize = 1800;
+  const labelHeight = 280;
+  const qrCanvasForExport = document.createElement("canvas");
+  await drawCenteredQr(qrCanvasForExport, contact, qrSize, 126);
+
+  const canvas = document.createElement("canvas");
+  canvas.width = qrSize;
+  canvas.height = qrSize + labelHeight;
+  const context = canvas.getContext("2d");
+  context.fillStyle = "#ffffff";
+  context.fillRect(0, 0, canvas.width, canvas.height);
+  context.drawImage(qrCanvasForExport, 0, 0);
+  drawCenteredCompanyName(context, companyDownloadLabel(contact), canvas.width, qrSize + 122);
+  return canvas;
 }
 
 function phoneSummary(contact) {
@@ -832,12 +953,46 @@ listEl.addEventListener("click", event => {
   }
 });
 
+qrLogoInput.addEventListener("change", async () => {
+  const file = qrLogoInput.files?.[0];
+  logoMessage.style.color = "var(--muted)";
+  logoMessage.textContent = file ? "Adding image to QR..." : "";
+
+  try {
+    const source = await readImageFile(file);
+    state.qrLogoDataUrl = source;
+    state.qrLogoImage = source ? await loadImage(source) : null;
+    removeQrLogoButton.hidden = !state.qrLogoImage;
+    logoMessage.style.color = "var(--success)";
+    logoMessage.textContent = state.qrLogoImage
+      ? "Image added. QR uses high correction for scanning."
+      : "";
+    if (state.selected) renderQr(state.selected);
+  } catch (error) {
+    state.qrLogoDataUrl = "";
+    state.qrLogoImage = null;
+    qrLogoInput.value = "";
+    removeQrLogoButton.hidden = true;
+    logoMessage.style.color = "var(--danger)";
+    logoMessage.textContent = error.message;
+    if (state.selected) renderQr(state.selected);
+  }
+});
+
+removeQrLogoButton.addEventListener("click", () => {
+  state.qrLogoDataUrl = "";
+  state.qrLogoImage = null;
+  qrLogoInput.value = "";
+  removeQrLogoButton.hidden = true;
+  logoMessage.textContent = "";
+  if (state.selected) renderQr(state.selected);
+});
+
 document.querySelector("#downloadQr").addEventListener("click", async () => {
   const contact = state.selected;
   if (!contact) return;
   try {
-    const canvas = document.createElement("canvas");
-    await drawCenteredQr(canvas, contact, 1800, 126);
+    const canvas = await createQrDownloadCanvas(contact);
     const link = document.createElement("a");
     link.download = `${downloadSafeName(contactDisplayName(contact))}_Contact-Qr.png`;
     link.href = canvas.toDataURL("image/png");
