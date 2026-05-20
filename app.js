@@ -1,7 +1,6 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_LOGO_KEY = "contactSaverQrLogo";
-const QR_VERSION = "logo-qr-2";
+const QR_VERSION = "logo-qr-3";
 
 const state = {
   contacts: [],
@@ -187,6 +186,7 @@ function normalizeContact(contact) {
     email: clean(contact.email).toLowerCase(),
     website: clean(contact.website),
     address: clean(contact.address),
+    qrLogoDataUrl: clean(contact.qrLogoDataUrl),
     deletedAt: contact.deletedAt || "",
     updatedAt: contact.updatedAt || new Date().toISOString()
   };
@@ -469,6 +469,7 @@ function contactFromForm(options = {}) {
     email: clean(data.email).toLowerCase(),
     website: clean(data.website),
     address: clean(data.address),
+    qrLogoDataUrl: state.qrLogoDataUrl,
     updatedAt: new Date().toISOString()
   };
 }
@@ -547,39 +548,6 @@ async function drawQr(canvas, contact, size, padding) {
   });
 }
 
-function saveQrLogo() {
-  try {
-    if (state.qrLogoDataUrl) {
-      localStorage.setItem(QR_LOGO_KEY, state.qrLogoDataUrl);
-    } else {
-      localStorage.removeItem(QR_LOGO_KEY);
-    }
-    return true;
-  } catch {
-    logoMessage.style.color = "var(--danger)";
-    logoMessage.textContent = "Image is too large to save after reload. Try a smaller logo.";
-    return false;
-  }
-}
-
-async function loadSavedQrLogo() {
-  const source = localStorage.getItem(QR_LOGO_KEY) || "";
-  if (!source) return;
-
-  try {
-    state.qrLogoDataUrl = source;
-    state.qrLogoImage = await loadImage(source);
-    removeQrLogoButton.hidden = false;
-    logoMessage.style.color = "var(--success)";
-    logoMessage.textContent = "Saved image restored.";
-  } catch {
-    state.qrLogoDataUrl = "";
-    state.qrLogoImage = null;
-    localStorage.removeItem(QR_LOGO_KEY);
-    removeQrLogoButton.hidden = true;
-  }
-}
-
 function loadImage(source) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -609,6 +577,37 @@ function readImageFile(file) {
     reader.onerror = () => reject(new Error("Image could not be read."));
     reader.readAsDataURL(file);
   });
+}
+
+async function setQrLogoState(source, message = "") {
+  state.qrLogoDataUrl = clean(source);
+  state.qrLogoImage = null;
+  if (state.qrLogoDataUrl) {
+    try {
+      state.qrLogoImage = await loadImage(state.qrLogoDataUrl);
+    } catch {
+      state.qrLogoDataUrl = "";
+      logoMessage.style.color = "var(--danger)";
+      logoMessage.textContent = "Saved image could not be loaded.";
+    }
+  }
+  qrLogoInput.value = "";
+  removeQrLogoButton.hidden = !state.qrLogoImage;
+  if (!state.qrLogoDataUrl || !logoMessage.textContent || message) {
+    logoMessage.style.color = state.qrLogoImage ? "var(--success)" : "var(--muted)";
+    logoMessage.textContent = message;
+  }
+}
+
+async function loadLogoForContact(contact) {
+  const source = clean(contact?.qrLogoDataUrl);
+  if (!source) return null;
+  if (source === state.qrLogoDataUrl && state.qrLogoImage) return state.qrLogoImage;
+  try {
+    return await loadImage(source);
+  } catch {
+    return null;
+  }
 }
 
 function roundedRect(context, x, y, width, height, radius) {
@@ -718,7 +717,7 @@ async function renderQr(contact) {
   qrCanvas.hidden = false;
   try {
     await drawQr(qrCanvas, contact, 320, null);
-    drawQrLogo(qrCanvas, state.qrLogoImage);
+    drawQrLogo(qrCanvas, await loadLogoForContact(contact));
   } catch (error) {
     qrCanvas.hidden = true;
     qrError.hidden = false;
@@ -729,7 +728,7 @@ async function renderQr(contact) {
 async function createQrDownloadCanvas(contact) {
   const qrSize = 1800;
   const canvas = document.createElement("canvas");
-  await drawCenteredQr(canvas, contact, qrSize, 126);
+  await drawCenteredQr(canvas, contact, qrSize, 126, await loadLogoForContact(contact));
   return canvas;
 }
 
@@ -818,17 +817,18 @@ function showView() {
   if (showSaved) renderList();
 }
 
-function selectContact(contact) {
+async function selectContact(contact) {
   clearTimeout(autosaveTimer);
   const latest = state.contacts.find(candidate => candidate.id === contact.id) || contact;
   state.selected = latest;
+  await setQrLogoState(latest.qrLogoDataUrl, latest.qrLogoDataUrl ? "Card image loaded." : "");
   renderPreview();
   return latest;
 }
 
-function openContactInEditor(contact, message = "") {
+async function openContactInEditor(contact, message = "") {
   clearTimeout(autosaveTimer);
-  const selected = selectContact(contact);
+  const selected = await selectContact(contact);
   fillForm(selected);
   messageEl.textContent = message;
   if (message) messageEl.style.color = "var(--success)";
@@ -877,7 +877,7 @@ if (addPhoneButton) {
   });
 }
 
-form.addEventListener("submit", event => {
+form.addEventListener("submit", async event => {
   event.preventDefault();
   clearTimeout(autosaveTimer);
   messageEl.style.color = "var(--success)";
@@ -886,6 +886,7 @@ form.addEventListener("submit", event => {
     const saved = upsertContact(contact);
     removeFromDeleted(saved.id);
     state.selected = saved;
+    await setQrLogoState(saved.qrLogoDataUrl, saved.qrLogoDataUrl ? "Card image saved." : "");
     fillForm(saved);
     renderList();
     renderPreview();
@@ -896,10 +897,11 @@ form.addEventListener("submit", event => {
   }
 });
 
-document.querySelector("#resetForm").addEventListener("click", () => {
+document.querySelector("#resetForm").addEventListener("click", async () => {
   clearTimeout(autosaveTimer);
   const saved = autosaveCurrentForm();
   state.selected = null;
+  await setQrLogoState("");
   fillForm();
   messageEl.textContent = "";
   renderPreview();
@@ -909,7 +911,7 @@ document.querySelector("#resetForm").addEventListener("click", () => {
   }
 });
 
-listEl.addEventListener("click", event => {
+listEl.addEventListener("click", async event => {
   const button = event.target.closest("[data-action]");
   if (!button) return;
   const item = event.target.closest(".contact-item");
@@ -918,10 +920,10 @@ listEl.addEventListener("click", event => {
   if (!contact) return;
 
   if (button.dataset.action === "select") {
-    openContactInEditor(contact);
+    await openContactInEditor(contact);
   }
   if (button.dataset.action === "edit") {
-    openContactInEditor(contact, "Editing saved card.");
+    await openContactInEditor(contact, "Editing saved card.");
   }
   if (button.dataset.action === "delete") {
     clearTimeout(autosaveTimer);
@@ -929,6 +931,7 @@ listEl.addEventListener("click", event => {
     state.contacts = state.contacts.filter(candidate => candidate.id !== contact.id);
     if (state.selected?.id === contact.id || form.id.value === contact.id) {
       state.selected = null;
+      await setQrLogoState("");
       fillForm();
       renderPreview();
     }
@@ -940,6 +943,7 @@ listEl.addEventListener("click", event => {
     const restored = upsertContact(contact);
     removeFromDeleted(contact.id);
     state.selected = restored;
+    await setQrLogoState(restored.qrLogoDataUrl, restored.qrLogoDataUrl ? "Card image loaded." : "");
     renderPreview();
     renderList();
   }
@@ -962,37 +966,30 @@ qrLogoInput.addEventListener("change", async () => {
 
   try {
     const source = await readImageFile(file);
-    state.qrLogoDataUrl = source;
-    state.qrLogoImage = source ? await loadImage(source) : null;
-    const logoSaved = saveQrLogo();
-    removeQrLogoButton.hidden = !state.qrLogoImage;
-    if (logoSaved) {
+    await setQrLogoState(source, source ? "Image added to this card." : "");
+    const saved = autosaveCurrentForm();
+    if (saved) {
       logoMessage.style.color = "var(--success)";
-      logoMessage.textContent = state.qrLogoImage
-        ? "Image added and saved for reload."
-        : "";
+      logoMessage.textContent = "Image saved to this card.";
     }
-    if (state.selected) renderQr(state.selected);
   } catch (error) {
-    state.qrLogoDataUrl = "";
-    state.qrLogoImage = null;
-    saveQrLogo();
-    qrLogoInput.value = "";
-    removeQrLogoButton.hidden = true;
+    await setQrLogoState("");
     logoMessage.style.color = "var(--danger)";
     logoMessage.textContent = error.message;
     if (state.selected) renderQr(state.selected);
   }
 });
 
-removeQrLogoButton.addEventListener("click", () => {
-  state.qrLogoDataUrl = "";
-  state.qrLogoImage = null;
-  saveQrLogo();
-  qrLogoInput.value = "";
-  removeQrLogoButton.hidden = true;
+removeQrLogoButton.addEventListener("click", async () => {
+  await setQrLogoState("");
   logoMessage.textContent = "";
-  if (state.selected) renderQr(state.selected);
+  const saved = autosaveCurrentForm();
+  if (saved) {
+    logoMessage.style.color = "var(--success)";
+    logoMessage.textContent = "Image removed from this card.";
+  } else if (state.selected) {
+    renderQr(state.selected);
+  }
 });
 
 document.querySelector("#downloadQr").addEventListener("click", async () => {
@@ -1027,7 +1024,7 @@ form.addEventListener("change", () => {
 
 async function init() {
   loadContacts();
-  await loadSavedQrLogo();
+  localStorage.removeItem("contactSaverQrLogo");
   fillForm();
   renderList();
   renderPreview();
