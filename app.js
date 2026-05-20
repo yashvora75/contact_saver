@@ -1,6 +1,7 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "logo-qr-1";
+const QR_LOGO_KEY = "contactSaverQrLogo";
+const QR_VERSION = "logo-qr-2";
 
 const state = {
   contacts: [],
@@ -546,6 +547,39 @@ async function drawQr(canvas, contact, size, padding) {
   });
 }
 
+function saveQrLogo() {
+  try {
+    if (state.qrLogoDataUrl) {
+      localStorage.setItem(QR_LOGO_KEY, state.qrLogoDataUrl);
+    } else {
+      localStorage.removeItem(QR_LOGO_KEY);
+    }
+    return true;
+  } catch {
+    logoMessage.style.color = "var(--danger)";
+    logoMessage.textContent = "Image is too large to save after reload. Try a smaller logo.";
+    return false;
+  }
+}
+
+async function loadSavedQrLogo() {
+  const source = localStorage.getItem(QR_LOGO_KEY) || "";
+  if (!source) return;
+
+  try {
+    state.qrLogoDataUrl = source;
+    state.qrLogoImage = await loadImage(source);
+    removeQrLogoButton.hidden = false;
+    logoMessage.style.color = "var(--success)";
+    logoMessage.textContent = "Saved image restored.";
+  } catch {
+    state.qrLogoDataUrl = "";
+    state.qrLogoImage = null;
+    localStorage.removeItem(QR_LOGO_KEY);
+    removeQrLogoButton.hidden = true;
+  }
+}
+
 function loadImage(source) {
   return new Promise((resolve, reject) => {
     const image = new Image();
@@ -692,42 +726,10 @@ async function renderQr(contact) {
   }
 }
 
-function companyDownloadLabel(contact) {
-  return clean(contact.company) || contactDisplayName(contact);
-}
-
-function drawCenteredCompanyName(context, text, width, y) {
-  const label = clean(text);
-  if (!label) return;
-  const maxWidth = width * 0.82;
-  let fontSize = 104;
-  context.fillStyle = "#172033";
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  context.font = `800 ${fontSize}px Inter, Arial, sans-serif`;
-
-  while (fontSize > 44 && context.measureText(label).width > maxWidth) {
-    fontSize -= 4;
-    context.font = `800 ${fontSize}px Inter, Arial, sans-serif`;
-  }
-
-  context.fillText(label, width / 2, y);
-}
-
 async function createQrDownloadCanvas(contact) {
   const qrSize = 1800;
-  const labelHeight = 280;
-  const qrCanvasForExport = document.createElement("canvas");
-  await drawCenteredQr(qrCanvasForExport, contact, qrSize, 126);
-
   const canvas = document.createElement("canvas");
-  canvas.width = qrSize;
-  canvas.height = qrSize + labelHeight;
-  const context = canvas.getContext("2d");
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, canvas.width, canvas.height);
-  context.drawImage(qrCanvasForExport, 0, 0);
-  drawCenteredCompanyName(context, companyDownloadLabel(contact), canvas.width, qrSize + 122);
+  await drawCenteredQr(canvas, contact, qrSize, 126);
   return canvas;
 }
 
@@ -962,15 +964,19 @@ qrLogoInput.addEventListener("change", async () => {
     const source = await readImageFile(file);
     state.qrLogoDataUrl = source;
     state.qrLogoImage = source ? await loadImage(source) : null;
+    const logoSaved = saveQrLogo();
     removeQrLogoButton.hidden = !state.qrLogoImage;
-    logoMessage.style.color = "var(--success)";
-    logoMessage.textContent = state.qrLogoImage
-      ? "Image added. QR uses high correction for scanning."
-      : "";
+    if (logoSaved) {
+      logoMessage.style.color = "var(--success)";
+      logoMessage.textContent = state.qrLogoImage
+        ? "Image added and saved for reload."
+        : "";
+    }
     if (state.selected) renderQr(state.selected);
   } catch (error) {
     state.qrLogoDataUrl = "";
     state.qrLogoImage = null;
+    saveQrLogo();
     qrLogoInput.value = "";
     removeQrLogoButton.hidden = true;
     logoMessage.style.color = "var(--danger)";
@@ -982,6 +988,7 @@ qrLogoInput.addEventListener("change", async () => {
 removeQrLogoButton.addEventListener("click", () => {
   state.qrLogoDataUrl = "";
   state.qrLogoImage = null;
+  saveQrLogo();
   qrLogoInput.value = "";
   removeQrLogoButton.hidden = true;
   logoMessage.textContent = "";
@@ -1018,8 +1025,13 @@ form.addEventListener("change", () => {
   scheduleAutosave();
 });
 
-loadContacts();
-fillForm();
-renderList();
-renderPreview();
-showView();
+async function init() {
+  loadContacts();
+  await loadSavedQrLogo();
+  fillForm();
+  renderList();
+  renderPreview();
+  showView();
+}
+
+init();
