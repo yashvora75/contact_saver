@@ -1,6 +1,6 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "logo-qr-5";
+const QR_VERSION = "logo-qr-6";
 const DEFAULT_QR_FOREGROUND = "#000000";
 const DEFAULT_QR_LOGO_SIZE = 17;
 const MIN_QR_LOGO_SIZE = 8;
@@ -796,6 +796,14 @@ function phoneLabelSummary(contact) {
     .join(" / ") || "No phone added";
 }
 
+function listCompanyName(contact) {
+  return clean(contact.company) || "No company added";
+}
+
+function listContactName(contact) {
+  return clean(contact.fullName) || "No contact name added";
+}
+
 function renderPreview() {
   const contact = state.selected;
   if (!contact) {
@@ -841,8 +849,8 @@ function renderList() {
       <div class="contact-main">
         ${avatarHtml(contact)}
         <div>
-          <h3>${escapeHtml(contactDisplayName(contact))}</h3>
-          <p>${escapeHtml(titleLine(contact) || contact.email || phoneSummary(contact))}</p>
+          <h3>${escapeHtml(listCompanyName(contact))}</h3>
+          <p>${escapeHtml(listContactName(contact))}</p>
           <p>${escapeHtml(phoneLabelSummary(contact))}</p>
         </div>
       </div>
