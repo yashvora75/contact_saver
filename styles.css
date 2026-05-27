@@ -22,7 +22,7 @@ body {
   color: var(--ink);
 }
 
-button, input { font: inherit; }
+button, input, select { font: inherit; }
 button { cursor: pointer; }
 a { color: inherit; }
 [hidden] { display: none !important; }
@@ -156,7 +156,7 @@ label span, .label-row span {
   color: var(--muted);
 }
 
-input {
+input, select {
   width: 100%;
   min-width: 0;
   border: 1px solid var(--line);
@@ -168,7 +168,7 @@ input {
   transition: border-color 0.16s ease, box-shadow 0.16s ease;
 }
 
-input:focus {
+input:focus, select:focus {
   border-color: var(--primary);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 16%, transparent);
 }
@@ -305,6 +305,12 @@ input:focus {
   height: 17px;
 }
 
+.color-option {
+  display: grid;
+  gap: 7px;
+  margin-top: 7px;
+}
+
 .size-option {
   display: grid;
   gap: 8px;
@@ -350,6 +356,10 @@ input:focus {
 #qrCanvas.is-transparent {
   outline: 1px dashed var(--line);
   outline-offset: 5px;
+}
+
+#qrCanvas.is-white-qr.is-transparent {
+  background: #172033;
 }
 
 .qr-error { margin: 14px; color: var(--danger); text-align: center; }

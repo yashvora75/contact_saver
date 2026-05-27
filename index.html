@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=logo-qr-4">
-  <script defer src="qrious.min.js?v=logo-qr-4"></script>
-  <script defer src="app.js?v=logo-qr-4"></script>
+  <link rel="stylesheet" href="styles.css?v=logo-qr-5">
+  <script defer src="qrious.min.js?v=logo-qr-5"></script>
+  <script defer src="app.js?v=logo-qr-5"></script>
 </head>
 <body>
   <header class="topbar">
@@ -115,7 +115,14 @@
             <input id="transparentQr" type="checkbox">
             <span>Transparent QR background</span>
           </label>
-          <p class="option-hint">Removes the white QR background only. The center image keeps a white protection area. Place exports on a light background for scanning.</p>
+          <p class="option-hint">Removes all white behind the QR and center image. Place the exported QR on a contrasting background for scanning.</p>
+          <label class="color-option" for="qrForeground">
+            <span>QR color</span>
+            <select id="qrForeground">
+              <option value="#000000">Black</option>
+              <option value="#ffffff">White</option>
+            </select>
+          </label>
           <label class="size-option" for="qrLogoSize">
             <span>Center image size <output id="qrLogoSizeValue" for="qrLogoSize">17%</output></span>
             <input id="qrLogoSize" type="range" min="8" max="18" value="17" step="1">
