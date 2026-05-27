@@ -283,6 +283,55 @@ input:focus {
   font-size: 13px;
 }
 
+.qr-options {
+  display: grid;
+  gap: 8px;
+  margin-top: 14px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #f8fbff;
+}
+
+.toggle-option {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  font-weight: 700;
+}
+
+.toggle-option input {
+  width: 17px;
+  height: 17px;
+}
+
+.size-option {
+  display: grid;
+  gap: 8px;
+  margin-top: 7px;
+}
+
+.size-option span {
+  display: flex;
+  justify-content: space-between;
+  font-weight: 700;
+}
+
+.size-option output {
+  color: var(--primary);
+}
+
+.size-option input {
+  padding: 0;
+}
+
+.option-hint {
+  margin: 0;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .qr-box {
   display: grid;
   place-items: center;
@@ -296,6 +345,11 @@ input:focus {
 #qrCanvas {
   width: min(320px, 74vw);
   height: min(320px, 74vw);
+}
+
+#qrCanvas.is-transparent {
+  outline: 1px dashed var(--line);
+  outline-offset: 5px;
 }
 
 .qr-error { margin: 14px; color: var(--danger); text-align: center; }

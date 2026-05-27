@@ -1,6 +1,9 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "logo-qr-3";
+const QR_VERSION = "logo-qr-4";
+const DEFAULT_QR_LOGO_SIZE = 17;
+const MIN_QR_LOGO_SIZE = 8;
+const MAX_QR_LOGO_SIZE = 18;
 
 const state = {
   contacts: [],
@@ -8,7 +11,9 @@ const state = {
   selected: null,
   showingDeleted: false,
   qrLogoDataUrl: "",
-  qrLogoImage: null
+  qrLogoImage: null,
+  qrTransparentBackground: false,
+  qrLogoSize: DEFAULT_QR_LOGO_SIZE
 };
 
 const createView = document.querySelector("#createView");
@@ -24,6 +29,9 @@ const qrError = document.querySelector("#qrError");
 const qrLogoInput = document.querySelector("#qrLogo");
 const removeQrLogoButton = document.querySelector("#removeQrLogo");
 const logoMessage = document.querySelector("#logoMessage");
+const transparentQrInput = document.querySelector("#transparentQr");
+const qrLogoSizeInput = document.querySelector("#qrLogoSize");
+const qrLogoSizeValue = document.querySelector("#qrLogoSizeValue");
 const previewCard = document.querySelector("#previewCard");
 const downloadVcf = document.querySelector("#downloadVcf");
 const savedTitle = document.querySelector("#savedTitle");
@@ -34,6 +42,12 @@ let isHydratingForm = false;
 
 function clean(value) {
   return String(value || "").trim();
+}
+
+function normalizeQrLogoSize(value) {
+  const size = Number(value);
+  if (!Number.isFinite(size)) return DEFAULT_QR_LOGO_SIZE;
+  return Math.min(MAX_QR_LOGO_SIZE, Math.max(MIN_QR_LOGO_SIZE, Math.round(size)));
 }
 
 function fileSafeName(value) {
@@ -187,6 +201,8 @@ function normalizeContact(contact) {
     website: clean(contact.website),
     address: clean(contact.address),
     qrLogoDataUrl: clean(contact.qrLogoDataUrl),
+    qrTransparentBackground: Boolean(contact.qrTransparentBackground),
+    qrLogoSize: normalizeQrLogoSize(contact.qrLogoSize),
     deletedAt: contact.deletedAt || "",
     updatedAt: contact.updatedAt || new Date().toISOString()
   };
@@ -470,6 +486,8 @@ function contactFromForm(options = {}) {
     website: clean(data.website),
     address: clean(data.address),
     qrLogoDataUrl: state.qrLogoDataUrl,
+    qrTransparentBackground: state.qrTransparentBackground,
+    qrLogoSize: state.qrLogoSize,
     updatedAt: new Date().toISOString()
   };
 }
@@ -537,6 +555,7 @@ function waitForQrLibrary() {
 
 async function drawQr(canvas, contact, size, padding) {
   await waitForQrLibrary();
+  const transparentBackground = Boolean(contact?.qrTransparentBackground);
   new QRious({
     element: canvas,
     value: vcardFor(contact),
@@ -544,7 +563,8 @@ async function drawQr(canvas, contact, size, padding) {
     padding,
     level: "H",
     foreground: "#000000",
-    background: "#ffffff"
+    background: "#ffffff",
+    backgroundAlpha: transparentBackground ? 0 : 1
   });
 }
 
@@ -599,6 +619,14 @@ async function setQrLogoState(source, message = "") {
   }
 }
 
+function setQrDesignState(contact = {}) {
+  state.qrTransparentBackground = Boolean(contact.qrTransparentBackground);
+  state.qrLogoSize = normalizeQrLogoSize(contact.qrLogoSize);
+  transparentQrInput.checked = state.qrTransparentBackground;
+  qrLogoSizeInput.value = String(state.qrLogoSize);
+  qrLogoSizeValue.textContent = `${state.qrLogoSize}%`;
+}
+
 async function loadLogoForContact(contact) {
   const source = clean(contact?.qrLogoDataUrl);
   if (!source) return null;
@@ -621,11 +649,11 @@ function roundedRect(context, x, y, width, height, radius) {
   context.closePath();
 }
 
-function drawQrLogo(canvas, image) {
+function drawQrLogo(canvas, image, logoSizePercent = DEFAULT_QR_LOGO_SIZE) {
   if (!image) return;
   const context = canvas.getContext("2d");
   const size = Math.min(canvas.width, canvas.height);
-  const logoSize = Math.round(size * 0.17);
+  const logoSize = Math.round(size * normalizeQrLogoSize(logoSizePercent) / 100);
   const badgePadding = Math.round(size * 0.025);
   const badgeSize = logoSize + badgePadding * 2;
   const badgeX = Math.round((canvas.width - badgeSize) / 2);
@@ -666,7 +694,7 @@ function findQrBounds(canvas) {
   for (let y = 0; y < height; y += 1) {
     for (let x = 0; x < width; x += 1) {
       const index = (y * width + x) * 4;
-      if (pixels[index] < 96 && pixels[index + 1] < 96 && pixels[index + 2] < 96) {
+      if (pixels[index + 3] > 0 && pixels[index] < 96 && pixels[index + 1] < 96 && pixels[index + 2] < 96) {
         minX = Math.min(minX, x);
         minY = Math.min(minY, y);
         maxX = Math.max(maxX, x);
@@ -692,8 +720,10 @@ async function drawCenteredQr(canvas, contact, size, quietZone, logoImage = stat
   canvas.width = size;
   canvas.height = size;
   context.imageSmoothingEnabled = false;
-  context.fillStyle = "#ffffff";
-  context.fillRect(0, 0, size, size);
+  if (!contact.qrTransparentBackground) {
+    context.fillStyle = "#ffffff";
+    context.fillRect(0, 0, size, size);
+  }
 
   if (!bounds) return;
   const x = Math.round((size - bounds.width) / 2);
@@ -709,15 +739,16 @@ async function drawCenteredQr(canvas, contact, size, quietZone, logoImage = stat
     bounds.width,
     bounds.height
   );
-  drawQrLogo(canvas, logoImage);
+  drawQrLogo(canvas, logoImage, contact.qrLogoSize);
 }
 
 async function renderQr(contact) {
   qrError.hidden = true;
   qrCanvas.hidden = false;
+  qrCanvas.classList.toggle("is-transparent", Boolean(contact.qrTransparentBackground));
   try {
     await drawQr(qrCanvas, contact, 320, null);
-    drawQrLogo(qrCanvas, await loadLogoForContact(contact));
+    drawQrLogo(qrCanvas, await loadLogoForContact(contact), contact.qrLogoSize);
   } catch (error) {
     qrCanvas.hidden = true;
     qrError.hidden = false;
@@ -749,6 +780,7 @@ function renderPreview() {
   if (!contact) {
     const context = qrCanvas.getContext("2d");
     context.clearRect(0, 0, qrCanvas.width, qrCanvas.height);
+    qrCanvas.classList.remove("is-transparent");
     qrError.hidden = true;
     downloadVcf.removeAttribute("href");
     downloadVcf.removeAttribute("download");
@@ -821,6 +853,7 @@ async function selectContact(contact) {
   clearTimeout(autosaveTimer);
   const latest = state.contacts.find(candidate => candidate.id === contact.id) || contact;
   state.selected = latest;
+  setQrDesignState(latest);
   await setQrLogoState(latest.qrLogoDataUrl, latest.qrLogoDataUrl ? "Card image loaded." : "");
   renderPreview();
   return latest;
@@ -886,6 +919,7 @@ form.addEventListener("submit", async event => {
     const saved = upsertContact(contact);
     removeFromDeleted(saved.id);
     state.selected = saved;
+    setQrDesignState(saved);
     await setQrLogoState(saved.qrLogoDataUrl, saved.qrLogoDataUrl ? "Card image saved." : "");
     fillForm(saved);
     renderList();
@@ -901,6 +935,7 @@ document.querySelector("#resetForm").addEventListener("click", async () => {
   clearTimeout(autosaveTimer);
   const saved = autosaveCurrentForm();
   state.selected = null;
+  setQrDesignState();
   await setQrLogoState("");
   fillForm();
   messageEl.textContent = "";
@@ -943,6 +978,7 @@ listEl.addEventListener("click", async event => {
     const restored = upsertContact(contact);
     removeFromDeleted(contact.id);
     state.selected = restored;
+    setQrDesignState(restored);
     await setQrLogoState(restored.qrLogoDataUrl, restored.qrLogoDataUrl ? "Card image loaded." : "");
     renderPreview();
     renderList();
@@ -992,6 +1028,28 @@ removeQrLogoButton.addEventListener("click", async () => {
   }
 });
 
+function saveQrDesignChange() {
+  state.qrTransparentBackground = transparentQrInput.checked;
+  state.qrLogoSize = normalizeQrLogoSize(qrLogoSizeInput.value);
+  qrLogoSizeValue.textContent = `${state.qrLogoSize}%`;
+
+  if (state.selected) {
+    state.selected = upsertContact({
+      ...state.selected,
+      qrTransparentBackground: state.qrTransparentBackground,
+      qrLogoSize: state.qrLogoSize,
+      updatedAt: new Date().toISOString()
+    });
+    renderList();
+    renderPreview();
+    return;
+  }
+  autosaveCurrentForm();
+}
+
+transparentQrInput.addEventListener("change", saveQrDesignChange);
+qrLogoSizeInput.addEventListener("input", saveQrDesignChange);
+
 document.querySelector("#downloadQr").addEventListener("click", async () => {
   const contact = state.selected;
   if (!contact) return;
@@ -1025,6 +1083,7 @@ form.addEventListener("change", () => {
 async function init() {
   loadContacts();
   localStorage.removeItem("contactSaverQrLogo");
+  setQrDesignState();
   fillForm();
   renderList();
   renderPreview();
