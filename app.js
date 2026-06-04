@@ -195,24 +195,25 @@ function vcardPhoneTypes(label) {
   return ["CELL", "VOICE"];
 }
 
-// Turn any label into a single safe TYPE token: strip the characters that
-// would break vCard parameter parsing (comma splits values, semicolon/colon
-// end the param, backslash escapes), keep spaces so the name stays readable.
+// Turn any label into ONE safe TYPE token. Samsung/AOSP parsers are strict:
+// spaces or punctuation in a TYPE value can make them drop the whole phone,
+// so collapse everything that is not a letter/number into a single hyphen.
 function phoneTypeToken(label) {
-  return clean(label).replace(/[,;:\\]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+  return clean(label).replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 }
 
 function vcardPhoneParameters(label) {
   const lower = clean(label).toLowerCase();
+  const standard = vcardPhoneTypes(label).join(",");
   if (STANDARD_PHONE_LABELS.includes(lower)) {
     // Known label -> native category dropdown on every device.
-    return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
+    return `;TYPE=${standard}`;
   }
-  // Custom label (a name, role, anything): push the exact text into TYPE so
-  // Android's quick "Add to contacts" shows it as the label. A non-empty TYPE
-  // is always present, so the number still imports on Samsung/AOSP too.
+  // Custom label (a name, role, anything): custom token FIRST so apps that
+  // show the leading TYPE display the name, plus a standard type as a fallback
+  // so Samsung/AOSP always recognise the line and import the number.
   const token = phoneTypeToken(label);
-  return token ? `;TYPE=${token}` : `;TYPE=${vcardPhoneTypes(label).join(",")}`;
+  return token ? `;TYPE=${token},${standard}` : `;TYPE=${standard}`;
 }
 
 function normalizeContact(contact) {
@@ -274,28 +275,18 @@ function vcardFor(contact) {
   if (contact.company) lines.push("X-ABShowAs:COMPANY");
   if (contact.role) lines.push(`TITLE:${escapeVCard(contact.role)}`);
 
-  let itemIndex = 1;
+  // FLAT properties only (no Apple "itemN." group prefix). Samsung/AOSP
+  // parsers silently drop grouped properties, which is why phone numbers
+  // vanished on Samsung while the plain EMAIL line imported fine. Every line
+  // here is a top-level property exactly like EMAIL, so it imports everywhere.
   normalizePhoneEntries(contact).forEach(entry => {
     const phone = fullPhone(entry);
     if (!phone) return;
     const label = clean(entry.label) || "Mobile";
-    const item = `item${itemIndex}`;
-    itemIndex += 1;
-    // ALWAYS emit a standard TYPE (CELL/WORK/HOME,VOICE). A TEL with no TYPE
-    // is dropped by Samsung/AOSP parsers, so this guarantees the number
-    // imports on every phone. The grouped X-ABLabel carries the exact custom
-    // text for iOS/Google Contacts; Android quick-add shows the standard
-    // category but the number always lands.
-    lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
-    lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
+    lines.push(`TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
-  if (contact.website) {
-    const item = `item${itemIndex}`;
-    itemIndex += 1;
-    lines.push(`${item}.URL:${escapeVCard(contact.website)}`);
-    lines.push(`${item}.X-ABLabel:Website`);
-  }
+  if (contact.website) lines.push(`URL:${escapeVCard(contact.website)}`);
   if (contact.address) lines.push(`ADR;TYPE=WORK:;;${escapeVCard(contact.address)};;;;`);
   lines.push("END:VCARD");
   return lines.join("\r\n") + "\r\n";
