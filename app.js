@@ -159,13 +159,12 @@ function splitPhoneNumber(value, fallbackCountryCode = "+91") {
 }
 
 function normalizePhoneEntry(entry, index = 0) {
-  const base = (typeof entry === "string")
-    ? splitLegacyPhone(entry)
-    : { label: entry?.label, countryCode: entry?.countryCode, number: entry?.number || entry?.phone };
+  if (typeof entry === "string") return splitLegacyPhone(entry);
+  const label = clean(entry?.label) || (index === 0 ? "Mobile" : "");
   return {
-    label: canonicalPhoneLabel(base.label),
-    countryCode: clean(base.countryCode) || "+91",
-    number: clean(base.number)
+    label,
+    countryCode: clean(entry?.countryCode) || "+91",
+    number: clean(entry?.number || entry?.phone)
   };
 }
 
@@ -184,37 +183,37 @@ function fullPhone(entry) {
   return [countryCode, number].filter(Boolean).join(" ");
 }
 
-// Standard phone labels offered in the dropdown. Each maps to a vCard TYPE
-// that Samsung, Android and iPhone all display as the SAME native category,
-// so whatever the user picks is exactly what shows after scanning the QR.
-const PHONE_LABEL_OPTIONS = [
-  { label: "Mobile", type: "CELL,VOICE" },
-  { label: "Work", type: "WORK,VOICE" },
-  { label: "Home", type: "HOME,VOICE" },
-  { label: "Main", type: "MAIN" },
-  { label: "Work Fax", type: "WORK,FAX" },
-  { label: "Other", type: "VOICE" }
-];
-const PHONE_LABELS = PHONE_LABEL_OPTIONS.map(option => option.label);
+// Labels that map cleanly to a native phone category on every platform.
+const STANDARD_PHONE_LABELS = ["", "mobile", "cell", "phone", "home", "work", "office", "landline", "main", "fax", "pager", "personal", "other"];
 
-// Map any stored label (including legacy free-text like "Dad" or
-// "Marketing Head") to the closest standard dropdown option.
-function canonicalPhoneLabel(label) {
-  const value = clean(label);
-  const exact = PHONE_LABEL_OPTIONS.find(option => option.label.toLowerCase() === value.toLowerCase());
-  if (exact) return exact.label;
-  const lower = value.toLowerCase();
-  if (lower.includes("fax")) return "Work Fax";
-  if (lower.includes("main")) return "Main";
-  if (lower.includes("home") || lower.includes("personal") || lower.includes("residence")) return "Home";
-  if (lower.includes("work") || lower.includes("office") || lower.includes("landline") || lower.includes("sales") || lower.includes("marketing") || lower.includes("department") || lower.includes("shop") || lower.includes("store") || lower.includes("showroom")) return "Work";
-  return "Mobile";
+function vcardPhoneTypes(label) {
+  const value = clean(label).toLowerCase();
+  if (value.includes("landline") || value.includes("office") || value.includes("work") || value.includes("department") || value.includes("sales") || value.includes("marketing")) {
+    return ["WORK", "VOICE"];
+  }
+  if (value.includes("home") || value.includes("personal")) return ["HOME", "VOICE"];
+  return ["CELL", "VOICE"];
+}
+
+// Turn any label into ONE safe TYPE token. Samsung/AOSP parsers are strict:
+// spaces or punctuation in a TYPE value can make them drop the whole phone,
+// so collapse everything that is not a letter/number into a single hyphen.
+function phoneTypeToken(label) {
+  return clean(label).replace(/[^a-z0-9]+/gi, "-").replace(/^-+|-+$/g, "").slice(0, 40);
 }
 
 function vcardPhoneParameters(label) {
-  const canonical = canonicalPhoneLabel(label);
-  const option = PHONE_LABEL_OPTIONS.find(item => item.label === canonical) || PHONE_LABEL_OPTIONS[0];
-  return `;TYPE=${option.type}`;
+  const lower = clean(label).toLowerCase();
+  const standard = vcardPhoneTypes(label).join(",");
+  if (STANDARD_PHONE_LABELS.includes(lower)) {
+    // Known label -> native category dropdown on every device.
+    return `;TYPE=${standard}`;
+  }
+  // Custom label (a name, role, anything): custom token FIRST so apps that
+  // show the leading TYPE display the name, plus a standard type as a fallback
+  // so Samsung/AOSP always recognise the line and import the number.
+  const token = phoneTypeToken(label);
+  return token ? `;TYPE=${token},${standard}` : `;TYPE=${standard}`;
 }
 
 function normalizeContact(contact) {
@@ -414,9 +413,22 @@ function phoneValuesFromForm() {
 function repairPhoneAutofill() {
   let repaired = false;
   [...form.querySelectorAll(".phone-row")].forEach((row, index) => {
+    const labelInput = row.querySelector(".phone-label-input");
     const countryInput = row.querySelector(".country-code-input");
     const numberInput = row.querySelector(".phone-number-input");
-    if (!countryInput || !numberInput) return;
+    if (!labelInput || !countryInput || !numberInput) return;
+
+    const label = clean(labelInput.value);
+    const countryCode = clean(countryInput.value) || "+91";
+    const number = clean(numberInput.value);
+
+    if (looksLikePhone(label) && !number) {
+      const parsed = splitPhoneNumber(label, countryCode);
+      countryInput.value = parsed.countryCode || countryCode;
+      numberInput.value = parsed.number;
+      labelInput.value = index === 0 ? "Mobile" : "";
+      repaired = true;
+    }
 
     if (looksLikePhone(clean(countryInput.value)) && !clean(numberInput.value)) {
       const parsed = splitPhoneNumber(countryInput.value, "+91");
@@ -445,12 +457,12 @@ function deleteIcon() {
 
 function phoneRowHtml(entry = {}, index = 0, rowCount = 1) {
   const phone = normalizePhoneEntry(entry, index);
-  const options = PHONE_LABEL_OPTIONS.map(option =>
-    `<option value="${escapeHtml(option.label)}"${option.label === phone.label ? " selected" : ""}>${escapeHtml(option.label)}</option>`
-  ).join("");
+  const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales, Marketing";
+  const labelValue = phone.label || (index === 0 ? "Mobile" : "");
+  const section = `section-phone-${index + 1}`;
   return `
     <div class="phone-row">
-      <select class="phone-label-input" aria-label="Number type">${options}</select>
+      <input class="phone-label-input" value="${escapeHtml(labelValue)}" placeholder="${escapeHtml(labelPlaceholder)}" autocomplete="off" readonly aria-label="Number type">
       <input class="country-code-input" value="${escapeHtml(phone.countryCode)}" placeholder="+91" list="countryCodes" inputmode="tel" autocomplete="off" aria-label="Country code">
       <input class="phone-number-input" value="${escapeHtml(phone.number)}" placeholder="9820942844" inputmode="tel" autocomplete="tel" aria-label="Phone number">
       <button class="circle-button add-phone" type="button" aria-label="Add phone number">${addIcon()}</button>
@@ -924,6 +936,11 @@ async function openContactInEditor(contact, message = "") {
   }
   window.scrollTo({ top: 0, behavior: "smooth" });
 }
+
+phoneFields.addEventListener("focusin", event => {
+  const labelInput = event.target.closest(".phone-label-input");
+  if (labelInput) labelInput.removeAttribute("readonly");
+});
 
 phoneFields.addEventListener("click", event => {
   const addButton = event.target.closest(".add-phone");
