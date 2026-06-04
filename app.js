@@ -205,7 +205,8 @@ function androidCustomPhoneType(label) {
 function vcardPhoneParameters(label) {
   const standardTypes = vcardPhoneTypes(label).join(",");
   const customType = androidCustomPhoneType(label);
-  return customType ? `;TYPE=${standardTypes},${customType}` : `;TYPE=${standardTypes}`;
+  // X- type first: Android reads the first TYPE value as the custom label
+  return customType ? `;TYPE=${customType},${standardTypes}` : `;TYPE=${standardTypes}`;
 }
 
 function normalizeContact(contact) {
@@ -797,7 +798,7 @@ async function renderQr(contact) {
   qrCanvas.classList.toggle("is-white-qr", normalizeQrForeground(contact.qrForeground) === "#ffffff");
   updateQrMeter(contact);
   try {
-    await drawQr(qrCanvas, contact, 320, null);
+    await drawQr(qrCanvas, contact, 640, null);
     if (generation !== renderQrGeneration) return;
     drawQrLogo(qrCanvas, await loadLogoForContact(contact), contact.qrLogoSize, contact.qrTransparentBackground);
   } catch (error) {
