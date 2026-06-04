@@ -364,6 +364,35 @@ input:focus, select:focus {
 
 .qr-error { margin: 14px; color: var(--danger); text-align: center; }
 
+.qr-meter {
+  margin-top: 10px;
+}
+
+.qr-meter-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--muted);
+  margin-bottom: 6px;
+}
+
+.qr-meter-track {
+  height: 7px;
+  background: var(--line);
+  border-radius: 999px;
+  overflow: hidden;
+}
+
+.qr-meter-fill {
+  height: 100%;
+  border-radius: 999px;
+  background: var(--success);
+  transition: width 0.3s ease, background 0.3s ease;
+  width: 0%;
+}
+
 .phone-card {
   margin-top: 18px;
   border: 1px solid var(--line);

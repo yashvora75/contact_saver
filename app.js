@@ -1,10 +1,12 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
-const QR_VERSION = "logo-qr-6";
+const QR_VERSION = "logo-qr-7";
 const DEFAULT_QR_FOREGROUND = "#000000";
 const DEFAULT_QR_LOGO_SIZE = 17;
 const MIN_QR_LOGO_SIZE = 8;
 const MAX_QR_LOGO_SIZE = 18;
+const QR_CAPACITY_H = 1273; // bytes at error-correction H (logo safe, 30% recovery)
+const QR_CAPACITY_Q = 2331; // bytes at error-correction Q (no logo, 25% recovery)
 
 const state = {
   contacts: [],
@@ -55,6 +57,18 @@ function normalizeQrLogoSize(value) {
 
 function normalizeQrForeground(value) {
   return value === "#ffffff" ? "#ffffff" : DEFAULT_QR_FOREGROUND;
+}
+
+function vcardByteSize(contact) {
+  return new TextEncoder().encode(vcardFor(contact)).length;
+}
+
+function qrLevel(contact) {
+  return contact?.qrLogoDataUrl ? "H" : "Q";
+}
+
+function qrCapacity(contact) {
+  return qrLevel(contact) === "H" ? QR_CAPACITY_H : QR_CAPACITY_Q;
 }
 
 function fileSafeName(value) {
@@ -257,11 +271,11 @@ function vcardFor(contact) {
   normalizePhoneEntries(contact).forEach(entry => {
     const phone = fullPhone(entry);
     if (!phone) return;
-    const label = clean(entry.label) || "Mobile";
+    const label = clean(entry.label);
     const item = `item${itemIndex}`;
     itemIndex += 1;
     lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
-    lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
+    if (label) lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
   if (contact.website) {
@@ -569,7 +583,7 @@ async function drawQr(canvas, contact, size, padding) {
     value: vcardFor(contact),
     size,
     padding,
-    level: "H",
+    level: qrLevel(contact),
     foreground,
     background,
     backgroundAlpha: transparentBackground ? 0 : 1
@@ -759,6 +773,20 @@ async function drawCenteredQr(canvas, contact, size, quietZone, logoImage = stat
   drawQrLogo(canvas, logoImage, contact.qrLogoSize, contact.qrTransparentBackground);
 }
 
+function updateQrMeter(contact) {
+  const meter = document.querySelector("#qrMeter");
+  if (!meter) return;
+  const bytes = vcardByteSize(contact);
+  const capacity = qrCapacity(contact);
+  const pct = Math.min(100, Math.round(bytes / capacity * 100));
+  const fill = meter.querySelector(".qr-meter-fill");
+  const label = meter.querySelector(".qr-meter-label");
+  fill.style.width = pct + "%";
+  fill.style.background = pct < 60 ? "var(--success)" : pct < 85 ? "#f59e0b" : "var(--danger)";
+  label.textContent = `${bytes} / ${capacity} bytes · ${pct}%`;
+  meter.hidden = false;
+}
+
 let renderQrGeneration = 0;
 
 async function renderQr(contact) {
@@ -767,6 +795,7 @@ async function renderQr(contact) {
   qrCanvas.hidden = false;
   qrCanvas.classList.toggle("is-transparent", Boolean(contact.qrTransparentBackground));
   qrCanvas.classList.toggle("is-white-qr", normalizeQrForeground(contact.qrForeground) === "#ffffff");
+  updateQrMeter(contact);
   try {
     await drawQr(qrCanvas, contact, 320, null);
     if (generation !== renderQrGeneration) return;
@@ -794,7 +823,7 @@ function phoneSummary(contact) {
 function phoneLabelSummary(contact) {
   return normalizePhoneEntries(contact)
     .filter(entry => fullPhone(entry))
-    .map(entry => `${clean(entry.label) || "Mobile"}: ${fullPhone(entry)}`)
+    .map(entry => `${clean(entry.label) || "Phone"}: ${fullPhone(entry)}`)
     .join(" / ") || "No phone added";
 }
 

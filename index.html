@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Contact Saver</title>
-  <link rel="stylesheet" href="styles.css?v=logo-qr-6">
-  <script defer src="qrious.min.js?v=logo-qr-6"></script>
-  <script defer src="app.js?v=logo-qr-6"></script>
+  <link rel="stylesheet" href="styles.css?v=logo-qr-7">
+  <script defer src="qrious.min.js?v=logo-qr-7"></script>
+  <script defer src="app.js?v=logo-qr-7"></script>
 </head>
 <body>
   <header class="topbar">
@@ -99,6 +99,16 @@
         <div class="qr-box">
           <canvas id="qrCanvas" width="320" height="320" aria-label="QR code"></canvas>
           <p class="qr-error" id="qrError" hidden></p>
+        </div>
+
+        <div id="qrMeter" class="qr-meter" hidden>
+          <div class="qr-meter-head">
+            <span>QR data</span>
+            <span class="qr-meter-label"></span>
+          </div>
+          <div class="qr-meter-track">
+            <div class="qr-meter-fill"></div>
+          </div>
         </div>
 
         <div class="logo-upload">
