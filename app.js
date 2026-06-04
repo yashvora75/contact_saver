@@ -5,8 +5,8 @@ const DEFAULT_QR_FOREGROUND = "#000000";
 const DEFAULT_QR_LOGO_SIZE = 17;
 const MIN_QR_LOGO_SIZE = 8;
 const MAX_QR_LOGO_SIZE = 18;
-const QR_CAPACITY_H = 1273; // bytes at error-correction H (logo safe, 30% recovery)
-const QR_CAPACITY_Q = 2331; // bytes at error-correction Q (no logo, 25% recovery)
+const QR_CAPACITY_H = 1273; // bytes at error-correction H (logo present, 30% recovery)
+const QR_CAPACITY_M = 2331; // bytes at error-correction M (no logo, less dense = easier to scan)
 
 const state = {
   contacts: [],
@@ -64,11 +64,13 @@ function vcardByteSize(contact) {
 }
 
 function qrLevel(contact) {
-  return contact?.qrLogoDataUrl ? "H" : "Q";
+  // H is required to survive the centre logo punch-out. Without a logo, M
+  // keeps the QR far less dense so phone cameras (incl. Samsung) scan it easily.
+  return contact?.qrLogoDataUrl ? "H" : "M";
 }
 
 function qrCapacity(contact) {
-  return qrLevel(contact) === "H" ? QR_CAPACITY_H : QR_CAPACITY_Q;
+  return qrLevel(contact) === "H" ? QR_CAPACITY_H : QR_CAPACITY_M;
 }
 
 function fileSafeName(value) {
@@ -190,12 +192,6 @@ function vcardPhoneTypes(label) {
   return ["CELL", "VOICE"];
 }
 
-const STANDARD_PHONE_LABELS = ["", "mobile", "cell", "phone", "home", "work", "office", "landline", "fax", "pager", "main"];
-
-function isCustomPhoneLabel(label) {
-  return !STANDARD_PHONE_LABELS.includes(clean(label).toLowerCase());
-}
-
 function vcardPhoneParameters(label) {
   return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
 }
@@ -263,20 +259,16 @@ function vcardFor(contact) {
   normalizePhoneEntries(contact).forEach(entry => {
     const phone = fullPhone(entry);
     if (!phone) return;
-    const label = clean(entry.label);
+    const label = clean(entry.label) || "Mobile";
     const item = `item${itemIndex}`;
     itemIndex += 1;
-    if (label && isCustomPhoneLabel(label)) {
-      // Custom label (name, role, anything): no standard TYPE, so Google
-      // Contacts / Android falls through to X-ABLabel and shows the exact text.
-      lines.push(`${item}.TEL:${escapeVCard(phone)}`);
-      lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
-    } else {
-      // Standard label (Mobile, Work, Home...): use the recognised TYPE so
-      // both platforms map it to the proper built-in category.
-      lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
-      if (label) lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
-    }
+    // ALWAYS emit a standard TYPE (CELL/WORK/HOME,VOICE). A TEL with no TYPE
+    // is dropped by Samsung/AOSP parsers, so this guarantees the number
+    // imports on every phone. The grouped X-ABLabel carries the exact custom
+    // text for iOS/Google Contacts; Android quick-add shows the standard
+    // category but the number always lands.
+    lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
+    lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
   if (contact.website) {
