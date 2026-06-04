@@ -190,23 +190,14 @@ function vcardPhoneTypes(label) {
   return ["CELL", "VOICE"];
 }
 
-function androidCustomPhoneType(label) {
-  const lower = clean(label).toLowerCase();
-  const standard = ["", "mobile", "cell", "phone", "home", "work", "office", "landline", "fax", "pager"];
-  if (standard.includes(lower)) return "";
-  const token = clean(label)
-    .replace(/&/g, "and")
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
-  return token ? `X-${token}` : "";
+const STANDARD_PHONE_LABELS = ["", "mobile", "cell", "phone", "home", "work", "office", "landline", "fax", "pager", "main"];
+
+function isCustomPhoneLabel(label) {
+  return !STANDARD_PHONE_LABELS.includes(clean(label).toLowerCase());
 }
 
 function vcardPhoneParameters(label) {
-  const standardTypes = vcardPhoneTypes(label).join(",");
-  const customType = androidCustomPhoneType(label);
-  // X- type first: Android reads the first TYPE value as the custom label
-  return customType ? `;TYPE=${customType},${standardTypes}` : `;TYPE=${standardTypes}`;
+  return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
 }
 
 function normalizeContact(contact) {
@@ -275,8 +266,17 @@ function vcardFor(contact) {
     const label = clean(entry.label);
     const item = `item${itemIndex}`;
     itemIndex += 1;
-    lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
-    if (label) lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
+    if (label && isCustomPhoneLabel(label)) {
+      // Custom label (name, role, anything): no standard TYPE, so Google
+      // Contacts / Android falls through to X-ABLabel and shows the exact text.
+      lines.push(`${item}.TEL:${escapeVCard(phone)}`);
+      lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
+    } else {
+      // Standard label (Mobile, Work, Home...): use the recognised TYPE so
+      // both platforms map it to the proper built-in category.
+      lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
+      if (label) lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
+    }
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
   if (contact.website) {
