@@ -176,25 +176,8 @@ function vcardPhoneTypes(label) {
   return ["CELL", "VOICE"];
 }
 
-function androidCustomPhoneType(label) {
-  const value = clean(label);
-  const lower = value.toLowerCase();
-  const standardLabels = ["", "mobile", "cell", "phone", "home", "work", "office", "landline"];
-  if (standardLabels.includes(lower)) return "";
-
-  const token = value
-    .replace(/&/g, " and ")
-    .replace(/[^a-z0-9]+/gi, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 32);
-
-  return token ? `X-${token}` : "";
-}
-
 function vcardPhoneParameters(label) {
-  const standardTypes = vcardPhoneTypes(label).join(",");
-  const customType = androidCustomPhoneType(label);
-  return customType ? `;TYPE=${standardTypes},${customType}` : `;TYPE=${standardTypes}`;
+  return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
 }
 
 function normalizeContact(contact) {
