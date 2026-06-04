@@ -183,6 +183,9 @@ function fullPhone(entry) {
   return [countryCode, number].filter(Boolean).join(" ");
 }
 
+// Labels that map cleanly to a native phone category on every platform.
+const STANDARD_PHONE_LABELS = ["", "mobile", "cell", "phone", "home", "work", "office", "landline", "main", "fax", "pager", "personal", "other"];
+
 function vcardPhoneTypes(label) {
   const value = clean(label).toLowerCase();
   if (value.includes("landline") || value.includes("office") || value.includes("work") || value.includes("department") || value.includes("sales") || value.includes("marketing")) {
@@ -192,8 +195,24 @@ function vcardPhoneTypes(label) {
   return ["CELL", "VOICE"];
 }
 
+// Turn any label into a single safe TYPE token: strip the characters that
+// would break vCard parameter parsing (comma splits values, semicolon/colon
+// end the param, backslash escapes), keep spaces so the name stays readable.
+function phoneTypeToken(label) {
+  return clean(label).replace(/[,;:\\]+/g, " ").replace(/\s+/g, " ").trim().slice(0, 40);
+}
+
 function vcardPhoneParameters(label) {
-  return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
+  const lower = clean(label).toLowerCase();
+  if (STANDARD_PHONE_LABELS.includes(lower)) {
+    // Known label -> native category dropdown on every device.
+    return `;TYPE=${vcardPhoneTypes(label).join(",")}`;
+  }
+  // Custom label (a name, role, anything): push the exact text into TYPE so
+  // Android's quick "Add to contacts" shows it as the label. A non-empty TYPE
+  // is always present, so the number still imports on Samsung/AOSP too.
+  const token = phoneTypeToken(label);
+  return token ? `;TYPE=${token}` : `;TYPE=${vcardPhoneTypes(label).join(",")}`;
 }
 
 function normalizeContact(contact) {
