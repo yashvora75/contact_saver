@@ -260,10 +260,10 @@ function vcardFor(contact) {
   normalizePhoneEntries(contact).forEach(entry => {
     const phone = fullPhone(entry);
     if (!phone) return;
+    const label = clean(entry.label) || "Mobile";
+    lines.push(`TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
     const item = `item${itemIndex}`;
     itemIndex += 1;
-    const label = clean(entry.label) || "Mobile";
-    lines.push(`${item}.TEL${vcardPhoneParameters(label)}:${escapeVCard(phone)}`);
     lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
