@@ -194,7 +194,7 @@ function androidCustomPhoneType(label) {
 function vcardPhoneParameters(label) {
   const standardTypes = vcardPhoneTypes(label).join(",");
   const customType = androidCustomPhoneType(label);
-  return customType ? `;TYPE=${customType}` : `;TYPE=${standardTypes}`;
+  return customType ? `;TYPE=${standardTypes},${customType}` : `;TYPE=${standardTypes}`;
 }
 
 function normalizeContact(contact) {
@@ -762,15 +762,20 @@ async function drawCenteredQr(canvas, contact, size, quietZone, logoImage = stat
   drawQrLogo(canvas, logoImage, contact.qrLogoSize, contact.qrTransparentBackground);
 }
 
+let renderQrGeneration = 0;
+
 async function renderQr(contact) {
+  const generation = ++renderQrGeneration;
   qrError.hidden = true;
   qrCanvas.hidden = false;
   qrCanvas.classList.toggle("is-transparent", Boolean(contact.qrTransparentBackground));
   qrCanvas.classList.toggle("is-white-qr", normalizeQrForeground(contact.qrForeground) === "#ffffff");
   try {
     await drawQr(qrCanvas, contact, 320, null);
+    if (generation !== renderQrGeneration) return;
     drawQrLogo(qrCanvas, await loadLogoForContact(contact), contact.qrLogoSize, contact.qrTransparentBackground);
   } catch (error) {
+    if (generation !== renderQrGeneration) return;
     qrCanvas.hidden = true;
     qrError.hidden = false;
     qrError.textContent = error.message;
