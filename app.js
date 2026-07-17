@@ -1,5 +1,8 @@
 const STORAGE_KEY = "contactSaverCards";
 const DELETED_KEY = "contactSaverDeletedCards";
+const GIST_TOKEN_KEY = "contactSaverGistToken";
+const GIST_ID_KEY = "contactSaverGistId";
+const GIST_FILENAME = "contact-saver-data.json";
 const QR_VERSION = "logo-qr-7";
 const DEFAULT_QR_FOREGROUND = "#000000";
 const DEFAULT_QR_LOGO_SIZE = 17;
@@ -44,6 +47,7 @@ const deletedToggle = document.querySelector("#deletedToggle");
 let qrLibraryPromise = null;
 let autosaveTimer = null;
 let isHydratingForm = false;
+let gistPushTimer = null;
 
 function clean(value) {
   return String(value || "").trim();
@@ -303,10 +307,12 @@ function vcardFor(contact) {
 
 function saveContacts() {
   persistLocal(STORAGE_KEY, state.contacts);
+  scheduleGistPush();
 }
 
 function saveDeleted() {
   persistLocal(DELETED_KEY, state.deleted);
+  scheduleGistPush();
 }
 
 function persistLocal(key, value) {
@@ -1156,6 +1162,161 @@ form.addEventListener("change", () => {
   scheduleAutosave();
 });
 
+// ── GitHub Gist sync ────────────────────────────────────────────────────────
+
+const gistSyncBtn    = document.querySelector("#gistSyncBtn");
+const gistModal      = document.querySelector("#gistModal");
+const gistTokenInput = document.querySelector("#gistTokenInput");
+const gistModalMsg   = document.querySelector("#gistModalMessage");
+const gistConnectBtn = document.querySelector("#gistConnectBtn");
+const gistDiscoBtn   = document.querySelector("#gistDisconnectBtn");
+const gistModalClose = document.querySelector("#gistModalClose");
+const savedEyebrow   = document.querySelector("#savedEyebrow");
+
+function gistToken() { return localStorage.getItem(GIST_TOKEN_KEY) || ""; }
+function gistId()    { return localStorage.getItem(GIST_ID_KEY) || ""; }
+function isGistConnected() { return Boolean(gistToken() && gistId()); }
+
+function updateGistUI() {
+  if (isGistConnected()) {
+    gistSyncBtn.textContent = "GitHub Synced ✓";
+    gistSyncBtn.classList.add("synced");
+    savedEyebrow.textContent = "Synced to GitHub";
+    gistDiscoBtn.hidden = false;
+  } else {
+    gistSyncBtn.textContent = "Connect GitHub";
+    gistSyncBtn.classList.remove("synced");
+    savedEyebrow.textContent = "Saved locally";
+    gistDiscoBtn.hidden = true;
+  }
+}
+
+function gistHeaders(token) {
+  return {
+    Authorization: `token ${token}`,
+    Accept: "application/vnd.github+json",
+    "Content-Type": "application/json"
+  };
+}
+
+async function fetchGistData() {
+  const res = await fetch(`https://api.github.com/gists/${gistId()}`, {
+    headers: gistHeaders(gistToken())
+  });
+  if (!res.ok) throw new Error(`GitHub returned ${res.status}`);
+  const data = await res.json();
+  const content = data.files?.[GIST_FILENAME]?.content;
+  if (!content) return null;
+  return JSON.parse(content);
+}
+
+async function pushToGist() {
+  if (!isGistConnected()) return;
+  const body = JSON.stringify({ contacts: state.contacts, deleted: state.deleted }, null, 2);
+  const res = await fetch(`https://api.github.com/gists/${gistId()}`, {
+    method: "PATCH",
+    headers: gistHeaders(gistToken()),
+    body: JSON.stringify({ files: { [GIST_FILENAME]: { content: body } } })
+  });
+  if (!res.ok) console.warn("Gist push failed:", res.status);
+}
+
+function scheduleGistPush() {
+  if (!isGistConnected()) return;
+  clearTimeout(gistPushTimer);
+  gistPushTimer = setTimeout(pushToGist, 1500);
+}
+
+async function pullAndMergeGist() {
+  if (!isGistConnected()) return;
+  try {
+    const remote = await fetchGistData();
+    if (!remote) return;
+
+    const remoteContacts = (Array.isArray(remote.contacts) ? remote.contacts : []).map(normalizeContact).filter(hasMeaningfulContactData);
+    const remoteDeleted  = (Array.isArray(remote.deleted)  ? remote.deleted  : []).map(normalizeContact).filter(hasMeaningfulContactData);
+
+    // Merge: keep any local card not present remotely, remote wins for shared IDs
+    const remoteIds = new Set(remoteContacts.map(c => c.id));
+    const localOnly = state.contacts.filter(c => !remoteIds.has(c.id));
+    state.contacts = [...remoteContacts, ...localOnly];
+    state.deleted  = remoteDeleted;
+
+    persistLocal(STORAGE_KEY, state.contacts);
+    persistLocal(DELETED_KEY, state.deleted);
+    renderList();
+  } catch (err) {
+    console.warn("Gist pull failed:", err.message);
+  }
+}
+
+async function createGistAndConnect(token) {
+  const body = JSON.stringify({ contacts: state.contacts, deleted: state.deleted }, null, 2);
+  const res = await fetch("https://api.github.com/gists", {
+    method: "POST",
+    headers: gistHeaders(token),
+    body: JSON.stringify({
+      description: "Contact Saver – contact cards backup",
+      public: false,
+      files: { [GIST_FILENAME]: { content: body } }
+    })
+  });
+  if (res.status === 401) throw new Error("Invalid token. Make sure you copied it fully and it has the 'gist' scope.");
+  if (!res.ok) throw new Error(`GitHub returned ${res.status}. Check the token has 'gist' scope.`);
+  const data = await res.json();
+  return data.id;
+}
+
+// Modal open/close
+gistSyncBtn.addEventListener("click", () => {
+  gistModalMsg.style.color = "";
+  gistModalMsg.textContent = isGistConnected() ? "You are connected. Your cards sync automatically." : "";
+  gistTokenInput.value = "";
+  gistModal.hidden = false;
+});
+
+gistModalClose.addEventListener("click", () => { gistModal.hidden = true; });
+gistModal.addEventListener("click", e => { if (e.target === gistModal) gistModal.hidden = true; });
+
+gistConnectBtn.addEventListener("click", async () => {
+  const token = gistTokenInput.value.trim();
+  if (!token) {
+    gistModalMsg.style.color = "var(--danger)";
+    gistModalMsg.textContent = "Paste your personal access token first.";
+    return;
+  }
+  gistConnectBtn.disabled = true;
+  gistConnectBtn.textContent = "Connecting…";
+  gistModalMsg.style.color = "var(--muted)";
+  gistModalMsg.textContent = "Creating a private Gist on your account…";
+  try {
+    const id = await createGistAndConnect(token);
+    localStorage.setItem(GIST_TOKEN_KEY, token);
+    localStorage.setItem(GIST_ID_KEY, id);
+    gistTokenInput.value = "";
+    gistModalMsg.style.color = "var(--success)";
+    gistModalMsg.textContent = "Connected! Your cards are now saved to GitHub forever.";
+    updateGistUI();
+    setTimeout(() => { gistModal.hidden = true; }, 1800);
+  } catch (err) {
+    gistModalMsg.style.color = "var(--danger)";
+    gistModalMsg.textContent = err.message;
+  } finally {
+    gistConnectBtn.disabled = false;
+    gistConnectBtn.textContent = "Connect & Sync";
+  }
+});
+
+gistDiscoBtn.addEventListener("click", () => {
+  localStorage.removeItem(GIST_TOKEN_KEY);
+  localStorage.removeItem(GIST_ID_KEY);
+  updateGistUI();
+  gistModalMsg.style.color = "var(--muted)";
+  gistModalMsg.textContent = "Disconnected. Cards still saved locally.";
+});
+
+// ── Init ────────────────────────────────────────────────────────────────────
+
 async function init() {
   loadContacts();
   localStorage.removeItem("contactSaverQrLogo");
@@ -1164,6 +1325,8 @@ async function init() {
   renderList();
   renderPreview();
   showView();
+  updateGistUI();
+  await pullAndMergeGist();
 }
 
 init();
