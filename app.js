@@ -162,6 +162,21 @@ function splitPhoneNumber(value, fallbackCountryCode = "+91") {
   return { countryCode: fallbackCountryCode, number: text };
 }
 
+function normalizeWebsiteEntry(entry) {
+  if (typeof entry === "string") return { label: "Website", url: clean(entry) };
+  return { label: clean(entry?.label) || "Website", url: clean(entry?.url || entry?.website) };
+}
+
+function normalizeWebsiteEntries(contact) {
+  if (Array.isArray(contact.websites) && contact.websites.length) {
+    return contact.websites.map(normalizeWebsiteEntry);
+  }
+  if (clean(contact.website)) {
+    return [{ label: "Website", url: clean(contact.website) }];
+  }
+  return [{ label: "Website", url: "" }];
+}
+
 function normalizePhoneEntry(entry, index = 0) {
   if (typeof entry === "string") return splitLegacyPhone(entry);
   const label = clean(entry?.label) || (index === 0 ? "Mobile" : "");
@@ -227,7 +242,7 @@ function normalizeContact(contact) {
     company: clean(contact.company),
     phones: normalizePhoneEntries(contact),
     email: clean(contact.email).toLowerCase(),
-    website: clean(contact.website),
+    websites: normalizeWebsiteEntries(contact),
     address: clean(contact.address),
     qrLogoDataUrl: clean(contact.qrLogoDataUrl),
     qrTransparentBackground: Boolean(contact.qrTransparentBackground),
@@ -294,12 +309,13 @@ function vcardFor(contact) {
     lines.push(`${item}.X-ABLabel:${escapeVCard(label)}`);
   });
   if (contact.email) lines.push(`EMAIL;TYPE=INTERNET:${escapeVCard(contact.email)}`);
-  if (contact.website) {
+  normalizeWebsiteEntries(contact).forEach(entry => {
+    if (!entry.url) return;
     const item = `item${itemIndex}`;
     itemIndex += 1;
-    lines.push(`${item}.URL:${escapeVCard(contact.website)}`);
-    lines.push(`${item}.X-ABLabel:Website`);
-  }
+    lines.push(`${item}.URL:${escapeVCard(entry.url)}`);
+    lines.push(`${item}.X-ABLabel:${escapeVCard(entry.label || "Website")}`);
+  });
   if (contact.address) lines.push(`ADR;TYPE=WORK:;;${escapeVCard(contact.address)};;;;`);
   lines.push("END:VCARD");
   return lines.join("\r\n") + "\r\n";
@@ -333,9 +349,9 @@ function hasMeaningfulContactData(contact) {
     clean(contact.role) ||
     clean(contact.company) ||
     clean(contact.email) ||
-    clean(contact.website) ||
     clean(contact.address) ||
-    normalizePhoneEntries(contact).some(entry => fullPhone(entry))
+    normalizePhoneEntries(contact).some(entry => fullPhone(entry)) ||
+    normalizeWebsiteEntries(contact).some(entry => entry.url)
   );
 }
 
@@ -470,6 +486,34 @@ function deleteIcon() {
   return '<svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 6h18M8 6V4h8v2M7 6l1 14h8l1-14M10 11v5M14 11v5"/></svg>';
 }
 
+const websiteFields = document.querySelector("#websiteFields");
+
+function websiteRowHtml(entry = {}, rowCount = 1) {
+  const w = normalizeWebsiteEntry(entry);
+  return `
+    <div class="website-row">
+      <input class="website-label-input" value="${escapeHtml(w.label)}" placeholder="Website, Instagram, Maps…" autocomplete="off" aria-label="Link label">
+      <input class="website-url-input" value="${escapeHtml(w.url)}" placeholder="https://…" inputmode="url" autocomplete="url" aria-label="URL">
+      <button class="circle-button add-website" type="button" aria-label="Add link">${addIcon()}</button>
+      <button class="circle-button remove-website" type="button" aria-label="Remove link" ${rowCount === 1 ? "disabled" : ""}>${deleteIcon()}</button>
+    </div>
+  `;
+}
+
+function renderWebsiteFields(websites = []) {
+  const values = websites.length ? websites : [{ label: "Website", url: "" }];
+  websiteFields.innerHTML = values.map(w => websiteRowHtml(w, values.length)).join("");
+}
+
+function websiteValuesFromForm() {
+  return [...websiteFields.querySelectorAll(".website-row")]
+    .map(row => normalizeWebsiteEntry({
+      label: row.querySelector(".website-label-input")?.value || "Website",
+      url: row.querySelector(".website-url-input")?.value || ""
+    }))
+    .filter(entry => entry.url);
+}
+
 function phoneRowHtml(entry = {}, index = 0, rowCount = 1) {
   const phone = normalizePhoneEntry(entry, index);
   const labelPlaceholder = index === 0 ? "Mobile" : "Landline, Sales, Marketing";
@@ -500,9 +544,9 @@ function fillForm(contact = {}) {
   form.role.value = normalized.role || "";
   form.company.value = normalized.company || "";
   form.email.value = normalized.email || "";
-  form.website.value = normalized.website || "";
   form.address.value = normalized.address || "";
   renderPhoneFields(normalizePhoneEntries(normalized));
+  renderWebsiteFields(normalizeWebsiteEntries(normalized));
   isHydratingForm = false;
 }
 
@@ -520,7 +564,7 @@ function contactFromForm(options = {}) {
     company,
     phones: phoneValuesFromForm(),
     email: clean(data.email).toLowerCase(),
-    website: clean(data.website),
+    websites: websiteValuesFromForm(),
     address: clean(data.address),
     qrLogoDataUrl: state.qrLogoDataUrl,
     qrTransparentBackground: state.qrTransparentBackground,
@@ -978,6 +1022,26 @@ phoneFields.addEventListener("click", event => {
   const rows = phoneFields.querySelectorAll(".phone-row");
   if (!rows.length) renderPhoneFields([{ label: "Mobile", countryCode: "+91", number: "" }]);
   if (rows.length === 1) rows[0].querySelector(".remove-phone").disabled = true;
+  scheduleAutosave();
+});
+
+websiteFields.addEventListener("click", event => {
+  if (event.target.closest(".add-website")) {
+    clearTimeout(autosaveTimer);
+    const rowCount = websiteFields.querySelectorAll(".website-row").length;
+    websiteFields.insertAdjacentHTML("beforeend", websiteRowHtml({ label: "", url: "" }, rowCount + 1));
+    websiteFields.querySelectorAll(".remove-website").forEach(btn => { btn.disabled = false; });
+    websiteFields.querySelector(".website-row:last-child .website-label-input")?.focus();
+    scheduleAutosave();
+    return;
+  }
+  const removeBtn = event.target.closest(".remove-website");
+  if (!removeBtn) return;
+  clearTimeout(autosaveTimer);
+  removeBtn.closest(".website-row")?.remove();
+  const rows = websiteFields.querySelectorAll(".website-row");
+  if (!rows.length) renderWebsiteFields([]);
+  if (rows.length === 1) rows[0].querySelector(".remove-website").disabled = true;
   scheduleAutosave();
 });
 
