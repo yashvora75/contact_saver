@@ -361,9 +361,9 @@ function formHasContent() {
     clean(form.role.value) ||
     clean(form.company.value) ||
     clean(form.email.value) ||
-    clean(form.website.value) ||
     clean(form.address.value) ||
-    phoneValuesFromForm().length
+    phoneValuesFromForm().length ||
+    websiteValuesFromForm().length
   );
 }
 
