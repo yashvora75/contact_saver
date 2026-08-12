@@ -324,11 +324,13 @@ function vcardFor(contact) {
 function saveContacts() {
   persistLocal(STORAGE_KEY, state.contacts);
   scheduleGistPush();
+  scheduleApiSync();
 }
 
 function saveDeleted() {
   persistLocal(DELETED_KEY, state.deleted);
   scheduleGistPush();
+  scheduleApiSync();
 }
 
 function persistLocal(key, value) {
@@ -1226,6 +1228,161 @@ form.addEventListener("change", () => {
   scheduleAutosave();
 });
 
+// ── Backend API ─────────────────────────────────────────────────────────────
+
+const API_URL = "https://YOUR_VPS_IP_OR_DOMAIN:4000"; // ← set your backend URL here
+const API_TOKEN_KEY = "contactSaverApiToken";
+const API_EMAIL_KEY = "contactSaverApiEmail";
+
+let apiSyncTimer = null;
+
+function apiToken() { return localStorage.getItem(API_TOKEN_KEY) || ""; }
+function apiEmail() { return localStorage.getItem(API_EMAIL_KEY) || ""; }
+function isApiLoggedIn() { return Boolean(apiToken()); }
+
+function apiHeaders() {
+  return { "Content-Type": "application/json", Authorization: `Bearer ${apiToken()}` };
+}
+
+async function apiRequest(method, path, body) {
+  const res = await fetch(`${API_URL}${path}`, {
+    method,
+    headers: apiHeaders(),
+    body: body ? JSON.stringify(body) : undefined
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `Server error ${res.status}`);
+  return data;
+}
+
+async function apiLoadContacts() {
+  if (!isApiLoggedIn()) return;
+  try {
+    const data = await apiRequest("GET", "/api/contacts");
+    const remoteContacts = (data.contacts || []).map(normalizeContact).filter(hasMeaningfulContactData);
+    const remoteDeleted  = (data.deleted  || []).map(normalizeContact).filter(hasMeaningfulContactData);
+    const remoteIds = new Set(remoteContacts.map(c => c.id));
+    const localOnly = state.contacts.filter(c => !remoteIds.has(c.id));
+    state.contacts = [...remoteContacts, ...localOnly];
+    state.deleted  = remoteDeleted;
+    persistLocal(STORAGE_KEY, state.contacts);
+    persistLocal(DELETED_KEY, state.deleted);
+    renderList();
+  } catch (err) {
+    console.warn("API load failed:", err.message);
+  }
+}
+
+async function apiSyncNow() {
+  if (!isApiLoggedIn()) return;
+  try {
+    await apiRequest("PUT", "/api/contacts", { contacts: state.contacts, deleted: state.deleted });
+  } catch (err) {
+    console.warn("API sync failed:", err.message);
+  }
+}
+
+function scheduleApiSync() {
+  if (!isApiLoggedIn()) return;
+  clearTimeout(apiSyncTimer);
+  apiSyncTimer = setTimeout(apiSyncNow, 1500);
+}
+
+// Auth modal wiring
+const authModal      = document.querySelector("#authModal");
+const authModalTitle = document.querySelector("#authModalTitle");
+const authEmailInput = document.querySelector("#authEmail");
+const authPassInput  = document.querySelector("#authPassword");
+const authModalMsg   = document.querySelector("#authModalMessage");
+const authSubmitBtn  = document.querySelector("#authSubmitBtn");
+const authSwitchBtn  = document.querySelector("#authSwitchBtn");
+const authLoggedInEl = document.querySelector("#authLoggedIn");
+const authUserEmail  = document.querySelector("#authUserEmail");
+const authBtn        = document.querySelector("#authBtn");
+
+let authMode = "login"; // "login" | "signup"
+
+function updateAuthUI() {
+  if (isApiLoggedIn()) {
+    authBtn.textContent = apiEmail() || "Account";
+    authBtn.classList.add("synced");
+  } else {
+    authBtn.textContent = "Log in";
+    authBtn.classList.remove("synced");
+  }
+}
+
+function openAuthModal() {
+  authModalMsg.textContent = "";
+  authEmailInput.value = "";
+  authPassInput.value = "";
+  const loggedIn = isApiLoggedIn();
+  authLoggedInEl.hidden = !loggedIn;
+  document.querySelector("#authModal > .modal-box > label:nth-of-type(1)").hidden = loggedIn;
+  document.querySelector("#authModal > .modal-box > label:nth-of-type(2)").hidden = loggedIn;
+  authSubmitBtn.hidden = loggedIn;
+  authSwitchBtn.hidden = loggedIn;
+  if (loggedIn) {
+    authUserEmail.textContent = apiEmail();
+    authModalTitle.textContent = "Account";
+  } else {
+    authModalTitle.textContent = authMode === "login" ? "Log in" : "Sign up";
+    authSubmitBtn.textContent  = authMode === "login" ? "Log in" : "Create account";
+    authSwitchBtn.textContent  = authMode === "login" ? "No account? Sign up" : "Have an account? Log in";
+  }
+  authModal.hidden = false;
+}
+
+authBtn.addEventListener("click", openAuthModal);
+document.querySelector("#authModalClose").addEventListener("click",  () => { authModal.hidden = true; });
+document.querySelector("#authModalClose2").addEventListener("click", () => { authModal.hidden = true; });
+authModal.addEventListener("click", e => { if (e.target === authModal) authModal.hidden = true; });
+
+authSwitchBtn.addEventListener("click", () => {
+  authMode = authMode === "login" ? "signup" : "login";
+  authModalMsg.textContent = "";
+  authModalTitle.textContent = authMode === "login" ? "Log in" : "Sign up";
+  authSubmitBtn.textContent  = authMode === "login" ? "Log in" : "Create account";
+  authSwitchBtn.textContent  = authMode === "login" ? "No account? Sign up" : "Have an account? Log in";
+});
+
+authSubmitBtn.addEventListener("click", async () => {
+  const email    = authEmailInput.value.trim();
+  const password = authPassInput.value.trim();
+  if (!email || !password) {
+    authModalMsg.style.color = "var(--danger)";
+    authModalMsg.textContent = "Enter your email and password.";
+    return;
+  }
+  authSubmitBtn.disabled = true;
+  authSubmitBtn.textContent = authMode === "login" ? "Logging in…" : "Creating account…";
+  authModalMsg.style.color = "var(--muted)";
+  authModalMsg.textContent = "Please wait…";
+  try {
+    const data = await apiRequest("POST", `/api/auth/${authMode}`, { email, password });
+    localStorage.setItem(API_TOKEN_KEY, data.token);
+    localStorage.setItem(API_EMAIL_KEY, data.email);
+    // Push any locally saved cards to the new account, then load from server
+    await apiSyncNow();
+    await apiLoadContacts();
+    updateAuthUI();
+    authModal.hidden = true;
+  } catch (err) {
+    authModalMsg.style.color = "var(--danger)";
+    authModalMsg.textContent = err.message;
+  } finally {
+    authSubmitBtn.disabled = false;
+    authSubmitBtn.textContent = authMode === "login" ? "Log in" : "Create account";
+  }
+});
+
+document.querySelector("#authLogoutBtn").addEventListener("click", () => {
+  localStorage.removeItem(API_TOKEN_KEY);
+  localStorage.removeItem(API_EMAIL_KEY);
+  updateAuthUI();
+  authModal.hidden = true;
+});
+
 // ── GitHub Gist sync ────────────────────────────────────────────────────────
 
 const gistSyncBtn    = document.querySelector("#gistSyncBtn");
@@ -1390,7 +1547,9 @@ async function init() {
   renderPreview();
   showView();
   updateGistUI();
+  updateAuthUI();
   await pullAndMergeGist();
+  await apiLoadContacts();
 }
 
 init();

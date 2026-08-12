@@ -20,6 +20,7 @@
     <nav class="top-actions" aria-label="Main navigation">
       <a class="nav-link" href="./">Create</a>
       <a class="status-pill" href="#saved" id="contactCount">0 cards</a>
+      <button class="ghost-button" type="button" id="authBtn">Log in</button>
     </nav>
   </header>
 
@@ -170,6 +171,35 @@
       <div id="contactList" class="contact-list"></div>
     </section>
   </main>
+
+  <!-- Auth modal -->
+  <div class="modal-overlay" id="authModal" hidden>
+    <div class="modal-box">
+      <h2 id="authModalTitle">Log in</h2>
+      <p id="authModalSubtitle">Your cards are saved to your account and available on every device.</p>
+      <label class="modal-field">
+        <span>Email</span>
+        <input type="email" id="authEmail" placeholder="you@example.com" autocomplete="email">
+      </label>
+      <label class="modal-field">
+        <span>Password</span>
+        <input type="password" id="authPassword" placeholder="Min. 8 characters" autocomplete="current-password">
+      </label>
+      <p id="authModalMessage" role="status" class="modal-message"></p>
+      <div class="modal-actions">
+        <button class="primary-button" type="button" id="authSubmitBtn">Log in</button>
+        <button class="ghost-button" type="button" id="authSwitchBtn">No account? Sign up</button>
+        <button class="ghost-button" type="button" id="authModalClose">Cancel</button>
+      </div>
+      <div id="authLoggedIn" hidden>
+        <p class="modal-message" style="color:var(--success)">Logged in as <strong id="authUserEmail"></strong></p>
+        <div class="modal-actions">
+          <button class="ghost-button danger-ghost" type="button" id="authLogoutBtn">Log out</button>
+          <button class="ghost-button" type="button" id="authModalClose2">Close</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <div class="modal-overlay" id="gistModal" hidden>
     <div class="modal-box">

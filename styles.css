@@ -448,6 +448,11 @@ input:focus, select:focus {
 .contact-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .icon-button.danger { color: var(--danger); }
 
+#authBtn.synced {
+  border-color: var(--success);
+  color: var(--success);
+}
+
 .sync-btn.synced {
   border-color: var(--success);
   color: var(--success);
